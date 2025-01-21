@@ -15,14 +15,11 @@ P0 = 101325              # sea-level standard atmospheric pressure (Pa)
 SCALE_HEIGHT = 8500      # scale height (m)
 
 DT = 1.0         # Time step (s)
-T_MAX = 400.0     # Simulation duration (s)
+T_MAX = 4000.0     # Simulation duration (s)
 
 # Volume fluctuation parameters
 FLUCTUATION_FRACTION = 0.05   # ±5% of the stationary volume
 FLUCTUATION_PERIOD = 60.0     # seconds for one full sine-wave cycle
-
-
-
 Cd = 0.285
 
 class Atmosphere:
@@ -49,7 +46,7 @@ class Atmosphere:
         Returns air density (kg/m^3) at a given altitude
         via the ideal gas law: rho = P * M_air / (R * T).
         """
-        p = self.pressure(altitude[1])
+        p = self.pressure(altitude)
         rho = p * self.molar_mass / (R * self.temperature)
         return rho
     
@@ -93,7 +90,7 @@ class Balloon:
         """
         Buoyant force = (density at altitude) * g * [dynamic volume].
         """
-        rho_air = self.atmosphere.density(self.altitude)
+        rho_air = self.atmosphere.density(self.altitude[1])
         return rho_air * G * self.dynamic_volume(t)
     
     def weight(self):
@@ -115,7 +112,7 @@ class Balloon:
 
     def drag_force(self, t):
         wind = self.atmosphere.get_wind_speed(self.altitude)
-        Densityat = self.atmosphere.density(self.altitude)
+        Densityat = self.atmosphere.density(self.altitude[1])
 
         (a1, a2) = self.cross_area(t)
         def calc(a, v):
@@ -182,7 +179,7 @@ ax.set_xlabel("X position (m)")
 ax.set_ylabel("Altitude (m)")
 
 # We'll allow y to range from 0 to 40,000 to visualize the motion
-ax.set_xlim(-20, 20)
+ax.set_xlim(-100, 100)
 ax.set_ylim(20000, 30000)
 
 # Create the circle object. We'll dynamically change its center and radius.
@@ -191,7 +188,7 @@ initial_radius = (volumes[0]) ** (1.0/3.0)  # just a placeholder, will update in
 circle = plt.Circle(initial_center, initial_radius, color='red')
 ax.add_patch(circle)
 
-x = np.arange(-100, 100, 3)
+x = np.arange(-100, 100, 20)
 y = np.arange(0, 40000, 1000)
 x, y = np.meshgrid(x, y)
 
@@ -200,10 +197,8 @@ v = np.zeros_like(y, dtype=float)
 
 for i in range(x.shape[0]):
     for j in range(y.shape[1]):
-        print((x[i, j], y[i, j]))
         speed = balloon.atmosphere.get_wind_speed((x[i, j], y[i, j]))
-        u[i, j] = speed
-        print(speed)
+        u[i, j] = speed * 5
 
 # Create the quiver plot
 plt.quiver(x, y, u, v, scale=1, scale_units='xy', angles='xy')
