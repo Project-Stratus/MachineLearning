@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import math
 
 # --- CONSTANTS ---
 G = 9.81                 # gravitational acceleration (m/s^2)
@@ -11,6 +12,10 @@ M_AIR = 0.0289647        # molar mass of air (kg/mol)
 P0 = 101325              # sea-level standard atmospheric pressure (Pa)
 SCALE_HEIGHT = 8500      # scale height (m)
 N_MOLES = 10.0           # number of moles of gas (arbitrary choice)
+
+
+
+Cd = 0.285
 
 class Atmosphere:
     """
@@ -36,9 +41,12 @@ class Atmosphere:
         Returns air density (kg/m^3) at a given altitude
         via the ideal gas law: rho = P * M_air / (R * T).
         """
-        p = self.pressure(altitude)
+        p = self.pressure(altitude[1])
         rho = p * self.molar_mass / (R * self.temperature)
         return rho
+    
+    def get_wind_speed(self, position):
+        return -1 if position[1] > 25000 else 1 if position[1] > 10000 else -1
 
 class Balloon:
     """
@@ -47,8 +55,8 @@ class Balloon:
     """
     def __init__(self, 
                  mass_balloon=2.0,   # kg, mass of balloon + payload
-                 altitude=25000.0,   # m (start around 25km)
-                 velocity=0.0,       # m/s
+                 altitude=(0, 25000),   # m (start around 25km)
+                 velocity=(0, 0),       # m/s
                  n_moles=N_MOLES,    # moles of lifting gas
                  atmosphere=Atmosphere()):
         
@@ -64,7 +72,7 @@ class Balloon:
         """
         Ideal volume from the Ideal Gas Law: V = (n * R * T_in) / P_ext.
         """
-        p_ext = self.atmosphere.pressure(self.altitude)
+        p_ext = self.atmosphere.pressure(self.altitude[1])
         return (self.n_moles * R * T_BALLOON) / p_ext
     
     def dynamic_volume(self, t):
@@ -99,29 +107,61 @@ class Balloon:
         """
         Net force = buoyant force - weight.
         """
-        return self.buoyant_force(t) - self.weight()
+        (drag_x, drag_y) = self.drag_force(t)
+        return (drag_x, drag_y + self.buoyant_force(t) - self.weight())
+
+    def cross_area(self, t): # assuming area sphere
+        radius = ((self.dynamic_volume(t) / np.pi) * 3 / 4) ** (1/3)
+        return (radius * radius * np.pi, radius * radius * np.pi)
+
+    def drag_force(self, t):
+        wind = self.atmosphere.get_wind_speed(self.altitude)
+        Densityat = self.atmosphere.density(self.altitude)
+
+        (a1, a2) = self.cross_area(t)
+        def calc(a, v):
+            if v > 0:
+                return -Cd * Densityat * v * v * a / 2
+            else:
+                return Cd * Densityat * v * v * a / 2
+        return (calc(a1, self.velocity[0] - wind), calc(a2, self.velocity[1]))
     
     def update(self, t, dt):
         """
         Update balloon velocity and altitude with simple Euler integration.
         """
-        a = self.net_force(t) / self.mass_balloon
-        self.velocity += a * dt
-        self.altitude += self.velocity * dt
+        a = div(self.net_force(t), self.mass_balloon)
+        self.velocity = add(self.velocity, mul(a, dt))
+        self.altitude = add(self.altitude, mul(self.velocity, dt))
         
         # Keep altitude non-negative
-        if self.altitude < 0:
-            self.altitude = 0
-            self.velocity = 0
+        if self.altitude[1] < 0:
+            self.altitude = (0, 0)
+            self.velocity = (0, 0)
+
+def add(z1, z2):
+    (z11, z12) = z1 
+    (z21, z22) = z2 
+    return (z11 + z21, z12 + z22)
+
+def div(z1, z2):
+    (z11, z12) = z1 
+    return (z11 / z2, z12 / z2)
+
+def mul(z1, z2):
+    (z11, z12) = z1 
+    return (z11 * z2, z12 * z2)
+
+
 
 # --- SIMULATION PARAMETERS ---
 dt = 1.0         # time step (s)
 t_max = 400.0    # total simulation time (s)
 
 balloon = Balloon(
-    mass_balloon=2.0,   # kg
-    altitude=25000.0,   # start altitude ~25km
-    velocity=0.0,
+    mass_balloon=20.0,   # kg
+    altitude=(0, 25000),   # start altitude ~25km
+    velocity=(0, 0),
     n_moles=N_MOLES
 )
 
@@ -145,27 +185,44 @@ ax.set_xlabel("X position (m)")
 ax.set_ylabel("Altitude (m)")
 
 # We give plenty of space in the x-axis so the balloon's radius won't be cut off.
-ax.set_xlim(-20, 20)
+ax.set_xlim(-100, 100)
 ax.set_ylim(0, 40000)
 
 # Create the circle object. We'll dynamically change its center and radius.
-initial_center = (0, altitudes[0])
+initial_center = altitudes[0]
 initial_radius = 1.0  # just a placeholder, will update in animate()
 circle = plt.Circle(initial_center, initial_radius, color='red')
 ax.add_patch(circle)
+
+x = np.arange(-100, 100, 3)
+y = np.arange(0, 40000, 1000)
+x, y = np.meshgrid(x, y)
+
+u = np.zeros_like(x, dtype=float)
+v = np.zeros_like(y, dtype=float)
+
+for i in range(x.shape[0]):
+    for j in range(y.shape[1]):
+        print((x[i, j], y[i, j]))
+        speed = balloon.atmosphere.get_wind_speed((x[i, j], y[i, j]))
+        u[i, j] = speed
+        print(speed)
+
+# Create the quiver plot
+plt.quiver(x, y, u, v, scale=1, scale_units='xy', angles='xy')
 
 # Keep aspect ratio 'equal' or 'auto' so the circle doesn't look squashed.
 ax.set_aspect('auto')  # or 'equal', but that can make the axis extremely tall
 
 def init():
-    circle.center = (0, altitudes[0])
+    circle.center = altitudes[0]
     return circle,
 
 def animate(i):
     # Update the balloon center to (0, altitude)
     y = altitudes[i]
     print(y)
-    circle.center = (0, y)
+    circle.center = y
     
     # Update radius based on the volume (scale with cubic root).
     # volumes[i] is in m^3, so radius ~ (volume)^(1/3) to visualize a sphere's characteristic size.
@@ -181,7 +238,7 @@ ani = animation.FuncAnimation(
     fig, animate, 
     frames=len(times), 
     init_func=init, 
-    interval=50, 
+    interval=1, 
     blit=True, 
     repeat=False
 )
