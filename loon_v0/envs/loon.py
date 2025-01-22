@@ -30,7 +30,7 @@ class Actions(Enum):
 
 
 class LoonEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
     def __init__(self, render_mode=None):
         self.window_size = 512  # The size of the PyGame window
@@ -101,11 +101,11 @@ class LoonEnv(gym.Env):
     def step(self, action):
 
         # Update the Balloon's position
-        self._balloon.update(self._time, 1.0)
+        self._balloon.update(self._time, DT)
         
         # Episodes finish after a number of time steps
         self._time += 1
-        terminated = self._time >= 120
+        terminated = self._time >= 600
 
         # Binary sparse rewards
         reward = self._balloon.altitude 
@@ -137,7 +137,7 @@ class LoonEnv(gym.Env):
         pygame.draw.circle(
             canvas,
             (255, 0, 0),
-            (self.window_size/2.0, (self._balloon.altitude/self.max_altitude)*self.window_size),
+            (self.window_size/2.0, self.window_size - (self._balloon.altitude/self.max_altitude)*self.window_size),
             20
         )
 
