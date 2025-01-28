@@ -13,7 +13,7 @@ M_AIR = 0.0289647        # molar mass of air (kg/mol)
 P0 = 101325              # sea-level standard atmospheric pressure (Pa)
 SCALE_HEIGHT = 8500      # scale height (m)
 
-DT = 1.0                 # Time step (s)
+DT = 0.1                 # Time step (s)
 T_MAX = 60.0             # Simulation duration (s) - shortened for demonstration
 
 # Volume fluctuation parameters
