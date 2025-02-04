@@ -102,13 +102,19 @@ class LoonEnv(gym.Env):
 
         # Update the Balloon's position
         self._balloon.update(self._time, DT)
-        
+
+        # Apply the action
+        if action[0] == 1:         # Too low
+            self._balloon.altitude += action[1][0]
+        elif action[0] == 2:       # Too high
+            self._balloon.altitude -= action[1][0]
+
         # Episodes finish after a number of time steps
         self._time += 1
         terminated = self._time >= 600
 
         # Binary sparse rewards
-        reward = self._balloon.altitude 
+        reward = self._balloon.altitude
 
         observation = self._get_obs()
         info = self._get_info()
@@ -177,14 +183,14 @@ class Atmosphere:
         self.scale_height = scale_height
         self.temperature = temperature
         self.molar_mass = molar_mass
-        
+
     def pressure(self, altitude):
         """
         Returns external pressure (Pa) at a given altitude
         using the exponential model: P(h) = P0 * exp(-h/H).
         """
         return self.p0 * np.exp(-altitude / self.scale_height)
-    
+
     def density(self, altitude):
         """
         Returns air density (kg/m^3) at a given altitude
