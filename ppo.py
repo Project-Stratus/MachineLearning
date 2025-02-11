@@ -1,47 +1,7 @@
-"""
-My rendition of a PPO based on this paper:
-https://arxiv.org/abs/1707.06347
-
-PPO Summary:
-A PPO is 'Proximal Policy Optimization'. That means:
- - Proximal = We don't optimize with respect to the raw reward, instead we optimize a "surrogate objective".
- - Policy Optimization = We optimize the policy pi based on rewards, as opposed to optimizing a value function like in Q-Learning.
-
-These models can not only deal with continuous action spaces, but have higher reliability, meaning that they don't get 'stuck' with bad policies as often.
-It's really good at utilizing data, making it a good fit for applications where data is expensive (like robotics). That attribute is not as applicable in these simulations.
-This model is stochastic, meaning that actions are chosen by converting the output of the actor to a probability distribtion, and then picking one randomly.
-It is also "On-Policy", which means that it updates the model based on actual decisions the model makes. 
-It is also "Online", meaning that it learns as it plays, rather than learning after a long session of playtime to begin training.
-
-PPOs have two models - an actor and a critic.
-The actor is what plays the game - it explores the environment and tries to earn reward. 
-We use the critic to evaluate the actor - this is what lets us know how to improve the actor. The critic tries to estimate the actor's average received value of each state,
-based the reward recieved (and the expected value from future states). 
-However, what the actor learns isn't a simple reward function. Instead, the actor learns a more complex formula called the surrogate objective (surrogate because it isn't just TD learning or straight reward).
-We use the critic's value guesses about state-action pairs the to tell the actor what it does well, and what it should do differently. 
-
-The PPO works by playing a small number of steps (the batch size), and then training multiple times on that batch of data. This is why the PPO is so data efficient; it re-uses data.
-The reason that it can re-use data better than other models can is because it scales the amount it learns based on how different the current model is from when the data is collected.
-The model is only sort of "Online" - it doesn't train after each action, instead it trains after a relatively small number of actions, called a batch. This is why it is important to
-check how different the model is after each training step - each time we train on an item from the batch, the policy gets more and more different from the policy used to make those
-actions, and the data becomes less relevant.
-PPOs also limit how much it will increase the likelyhood of an action, so avoid overfitting on high rewards on single steps. 
-
-The surrogate objective is: min( r*A, clip(r, 1-e, 1+e)*A )
-Where r is the difference between the policy used to , e is some small number, and A is the advantage for the current state-action pair. A = discounted rewards - critic's estimate
-The "clip" is what limits change based on model difference, and the "min" ensures that we don't increase the likelyhood of any action too much in a single step.
-"""
-
 import gymnasium as gym
 import numpy as np
 import os
-import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch import optim
-from torch.autograd import Variable
-from torch.distributions import Categorical
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
 
@@ -64,7 +24,7 @@ REWARD_THRESHOLD = 250
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
-def train(verbose=False, render_freq=None) -> pd.DataFrame:
+def train(verbose=False, render_freq=None) -> None:
 
     env: gym.Env = gym.make(ENVIRONMENT_NAME, render_mode=None, disable_env_checker=True)
 
@@ -103,8 +63,6 @@ def train(verbose=False, render_freq=None) -> pd.DataFrame:
     if not os.path.exists(SAVE_PATH):
         os.makedirs(SAVE_PATH)
     model.save(os.path.join(SAVE_PATH, "ppo"))
-
-    return pd.DataFrame()
 
 
 # Load the final model from the previous training run, and dipslay it playing the environment

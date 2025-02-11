@@ -1,8 +1,5 @@
 import ppo
 import argparse
-import pandas as pd
-import seaborn as sns
-from matplotlib import pyplot as plt
 import os
 
 
@@ -17,12 +14,4 @@ if __name__ == "__main__":
     if not args.train:
         ppo.test()
     else:
-        reward_df = ppo.train(verbose=True)
-
-        # Plot the average reward over time
-        sns.lineplot(x='episode', y='reward', data=reward_df)
-        plt.title(f"Reward Over Episodes")
-        plt.xlabel("Episode")
-        plt.ylabel("Total Reward")
-        plt.savefig(f"{os.getcwd() + ppo.SAVE_PATH}/PPO_reward_over_episodes.png")
-        plt.show()
+        ppo.train(verbose=True)
