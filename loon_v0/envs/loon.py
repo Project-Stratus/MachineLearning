@@ -43,11 +43,11 @@ class LoonEnv(gym.Env):
         # Observations are dictionaries with the agent's and the target's location.
         self.observation_space = spaces.Dict(
             {
-                "goal":      spaces.Box(low=0,    high=1.0, dtype=float),
-                "volume":    spaces.Box(low=0,    high=1.0, dtype=float),
-                "altitude":  spaces.Box(low=0,    high=1.0, dtype=float),
-                "velocity":  spaces.Box(low=-1.0, high=1.0, dtype=float),
-                "pressure":  spaces.Box(low=0,    high=1.0, dtype=float),
+                "goal":      spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
+                "volume":    spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
+                "altitude":  spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
+                "velocity":  spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=float),
+                "pressure":  spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
             }
         )
 
@@ -55,7 +55,10 @@ class LoonEnv(gym.Env):
         self.action_space = spaces.Discrete(3)
 
         # Define a random goal for the agento to reach
-        self.goal = self.np_random.uniform(low=0, high=self.max_altitude)
+        self.goal = self.np_random.uniform(low=0, high=self.max_altitude, size=(1,))
+
+        self.final_obs = None
+        self.truncated = False
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -71,16 +74,19 @@ class LoonEnv(gym.Env):
         self.clock = None
 
     def _get_obs(self):
-        return np.array([
-            self.goal / self.max_altitude,
-            self._balloon.volume / self.max_volume,
-            self._balloon.altitude / self.max_altitude,
-            self._balloon.velocity / self.max_velocity,
-            self._atmosphere.pressure(self._balloon.altitude) / self.max_pressure
-        ])
+        return {
+            "goal":      np.array([self.goal / self.max_altitude]),
+            "volume":    np.array([self._balloon.volume / self.max_volume]),
+            "altitude":  np.array([self._balloon.altitude / self.max_altitude]),
+            "velocity":  np.array([self._balloon.velocity / self.max_velocity]),
+            "pressure":  np.array([self._atmosphere.pressure(self._balloon.altitude) / self.max_pressure])
+        }
 
     def _get_info(self):
-        return []
+        return {
+            "TimeLimit.truncated": self.truncated,
+            "terminal_observation": self.final_obs,
+            }
 
     def reset(self, seed=None, options=None):
         # We need the following line to seed self.np_random
@@ -124,10 +130,16 @@ class LoonEnv(gym.Env):
         terminated = self._balloon.altitude <= 0
         truncated = self._time >= self.TIME_MAX
 
+        if truncated and not terminated:
+            self.truncated = True
+
         # Reward the player based on distance to the goal
         reward = goal_dist if not terminated else self.PUNISHMENT
 
         observation = self._get_obs()
+        if terminated or truncated:
+            self.final_obs = observation
+
         info = self._get_info()
 
         if self.render_mode == "human":
