@@ -17,26 +17,25 @@ P0 = 101325              # sea-level standard atmospheric pressure (Pa)
 SCALE_HEIGHT = 8500      # scale height (m)
 
 DT = 1.0                 # Time step (s)
-T_MAX = 400.0            # Simulation duration (s)
-
-# Volume fluctuation parameters
-FLUCTUATION_FRACTION = 0.05   # ±5% of the stationary volume
-FLUCTUATION_PERIOD = 60.0     # seconds for one full sine-wave cycle
 
 
 class Actions(Enum):
     inflate = 0
     deflate = 1
+    nothing = 2
 
 
 class LoonEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
+    TIME_MAX = 400
+    PUNISHMENT = -400
+
     def __init__(self, render_mode=None):
         self.window_size = 512  # The size of the PyGame window
 
         # Define ranges for each observation
-        self.max_mass = 20.0
+        self.max_volume = 20.0
         self.max_altitude = 20000.0
         self.max_velocity = 50.0
         self.max_pressure = 100000
@@ -44,15 +43,22 @@ class LoonEnv(gym.Env):
         # Observations are dictionaries with the agent's and the target's location.
         self.observation_space = spaces.Dict(
             {
-                "mass":      spaces.Box(low=0,                  high=self.max_mass,     dtype=float),
-                "altitude":  spaces.Box(low=0,                  high=self.max_altitude, dtype=float),
-                "velocity":  spaces.Box(low=-self.max_velocity, high=self.max_velocity, dtype=float),
-                "pressure":  spaces.Box(low=0,                  high=self.max_pressure, dtype=float),
+                "goal":      spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
+                "volume":    spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
+                "altitude":  spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
+                "velocity":  spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=float),
+                "pressure":  spaces.Box(low=0,    high=1.0, shape=(1,), dtype=float),
             }
         )
 
+        # The action space consists of two discrete actions: inflate and deflate
+        self.action_space = spaces.Discrete(3)
 
-        self.action_space = spaces.Discrete(2)
+        # Define a random goal for the agento to reach
+        self.goal = self.np_random.uniform(low=0, high=self.max_altitude, size=(1,))
+
+        self.final_obs = None
+        self.truncated = False
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -68,13 +74,19 @@ class LoonEnv(gym.Env):
         self.clock = None
 
     def _get_obs(self):
-        return {"mass":     np.array([self._balloon.mass_balloon]),
-                "altitude": np.array([self._balloon.altitude]),
-                "velocity": np.array([self._balloon.velocity]),
-                "pressure": np.array([self._atmosphere.pressure(self._balloon.altitude)])}
+        return {
+            "goal":      np.array([self.goal / self.max_altitude]),
+            "volume":    np.array([self._balloon.volume / self.max_volume]),
+            "altitude":  np.array([self._balloon.altitude / self.max_altitude]),
+            "velocity":  np.array([self._balloon.velocity / self.max_velocity]),
+            "pressure":  np.array([self._atmosphere.pressure(self._balloon.altitude) / self.max_pressure])
+        }
 
     def _get_info(self):
-        return {}
+        return {
+            "TimeLimit.truncated": self.truncated,
+            "terminal_observation": self.final_obs,
+            }
 
     def reset(self, seed=None, options=None):
         # We need the following line to seed self.np_random
@@ -87,8 +99,11 @@ class LoonEnv(gym.Env):
         self._atmosphere = Atmosphere()
         self._balloon = Balloon(self._atmosphere,
                                 mass_balloon=2.0,
-                                altitude=2000.0,
+                                altitude=np.random.uniform(low=0, high=self.max_altitude),
                                 velocity=0.0)
+
+        # Randomly reset the goal
+        self.goal = self.np_random.uniform(low=0, high=self.max_altitude)
 
         observation = self._get_obs()
         info = self._get_info()
@@ -100,29 +115,37 @@ class LoonEnv(gym.Env):
 
     def step(self, action):
 
+        # Inflate or deflate the balloon
+        if action == Actions.inflate.value:
+            self._balloon.inflate(0.02)
+        elif action == Actions.deflate.value:
+            self._balloon.inflate(-0.02)
+
         # Update the Balloon's position
-        self._balloon.update(self._time, DT)
-
-        # Apply the action
-        if action[0] == 1:         # Too low
-            self._balloon.altitude += action[1][0]
-        elif action[0] == 2:       # Too high
-            self._balloon.altitude -= action[1][0]
-
+        self._balloon.update(DT)
+        goal_dist = (1 - abs(self._balloon.altitude - self.goal)/self.max_altitude)**8 # Only give reward if the balloon is close to the goal
+        
         # Episodes finish after a number of time steps
         self._time += 1
-        terminated = self._time >= 600
+        terminated = self._balloon.altitude <= 0
+        truncated = self._time >= self.TIME_MAX
 
-        # Binary sparse rewards
-        reward = self._balloon.altitude
+        if truncated and not terminated:
+            self.truncated = True
+
+        # Reward the player based on distance to the goal
+        reward = goal_dist if not terminated else self.PUNISHMENT
 
         observation = self._get_obs()
+        if terminated or truncated:
+            self.final_obs = observation
+
         info = self._get_info()
 
         if self.render_mode == "human":
             self._render_frame()
 
-        return observation, reward, terminated, False, info
+        return observation, reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode == "rgb_array":
@@ -144,6 +167,14 @@ class LoonEnv(gym.Env):
             canvas,
             (255, 0, 0),
             (self.window_size/2.0, self.window_size - (self._balloon.altitude/self.max_altitude)*self.window_size),
+            20
+        )
+
+        # Then we draw the goal
+        pygame.draw.circle(
+            canvas,
+            (0, 255, 0),
+            (self.window_size/2.0, self.window_size - (self.goal/self.max_altitude)*self.window_size),
             20
         )
 
@@ -224,25 +255,14 @@ class Balloon:
         # Compute the "stationary volume" that exactly balances
         # the balloon's weight at this initial altitude:
         rho_air = self.atmosphere.density(self.altitude)
-        self.stationary_volume = self.mass_balloon / rho_air
+        self.volume = self.mass_balloon / rho_air # Default to a volume that would be stationary
     
-    def dynamic_volume(self, t):
-        """
-        Slightly oscillate around the stationary volume:
-          V(t) = V_stationary + amplitude * sin(...)
-        with amplitude = (FLUCTUATION_FRACTION * V_stationary).
-        """
-        amplitude = FLUCTUATION_FRACTION * self.stationary_volume
-        phase = 2.0 * np.pi * (t / FLUCTUATION_PERIOD)
-        
-        return self.stationary_volume + amplitude * np.sin(phase)
-    
-    def buoyant_force(self, t):
+    def buoyant_force(self):
         """
         Buoyant force = (density at altitude) * g * [dynamic volume].
         """
         rho_air = self.atmosphere.density(self.altitude)
-        return rho_air * G * self.dynamic_volume(t)
+        return rho_air * G * self.volume
     
     def weight(self):
         """
@@ -250,21 +270,23 @@ class Balloon:
         """
         return self.mass_balloon * G
     
-    def net_force(self, t):
+    def net_force(self):
         """
         Net force = buoyant force - weight.
         """
-        return self.buoyant_force(t) - self.weight()
+        return self.buoyant_force() - self.weight()
     
-    def update(self, t, dt):
+    def inflate(self, delta_volume):
+        """
+        Inflate or deflate the balloon by a small amount.
+        """
+        self.volume += delta_volume
+
+    def update(self, dt):
         """
         Update balloon's velocity and altitude (simple Euler method).
         """
-        a = self.net_force(t) / self.mass_balloon
+
+        a = self.net_force() / self.mass_balloon
         self.velocity += a * dt
         self.altitude += self.velocity * dt
-        
-        # Prevent negative altitude:
-        if self.altitude < 0:
-            self.altitude = 0
-            self.velocity = 0
