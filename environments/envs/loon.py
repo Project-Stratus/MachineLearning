@@ -25,7 +25,7 @@ class Actions(Enum):
     nothing = 2
 
 
-class LoonEnv(gym.Env):
+class Balloon1DEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
     TIME_MAX = 400

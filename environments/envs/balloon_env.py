@@ -1,6 +1,6 @@
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import matplotlib.pyplot as plt
 
 # -------------------------------
@@ -139,7 +139,7 @@ class Balloon:
 # -------------------------------
 # CUSTOM GYM ENVIRONMENT
 # -------------------------------
-class BalloonEnv(gym.Env):
+class Balloon2DEnv(gym.Env):
     """
     A Gym environment for 2D balloon control.
     
@@ -156,7 +156,7 @@ class BalloonEnv(gym.Env):
     metadata = {'render.modes': ['human']}
     
     def __init__(self):
-        super(BalloonEnv, self).__init__()
+        super(Balloon2DEnv, self).__init__()
         # Observation: [x, y, vx, vy, 18 wind components] → 22 values.
         low_obs = np.concatenate((
             np.array([X_RANGE[0], Y_RANGE[0], -200.0, -200.0]),

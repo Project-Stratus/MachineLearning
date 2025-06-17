@@ -5,9 +5,9 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
 
 
-ENVIRONMENT_NAME = "loon_v0/LoonEnv-v0"
-SAVE_PATH = "./model_saves/"
-VIDEO_PATH = "/performance_video/"
+ENVIRONMENT_NAME = "environments/Balloon1D-v0"
+SAVE_PATH = "./models/ppo_model/"
+VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
 EPISODES = 1000000

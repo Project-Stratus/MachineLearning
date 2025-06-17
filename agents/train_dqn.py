@@ -12,13 +12,13 @@ import torch
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from environments.envs.balloon_env import BalloonEnv, X_RANGE, Y_RANGE, x_forces, y_forces, fx_grid, fy_grid, x_edges, y_edges
+from environments.envs.balloon_env import Balloon2DEnv, X_RANGE, Y_RANGE, x_forces, y_forces, fx_grid, fy_grid, x_edges, y_edges
 
 from agents.dqn_agent import DQNAgent
 
 
 def train(num_episodes=500, target_update=10):
-    env = BalloonEnv()
+    env = Balloon2DEnv()
     state_dim = env.observation_space.shape[0]  # [y, vy]
     action_dim = env.action_space.n             # 3 actions: down, none, up
     agent = DQNAgent(state_dim, action_dim)
@@ -70,7 +70,7 @@ def train(num_episodes=500, target_update=10):
     torch.save(agent.policy_net.state_dict(), "dqn_balloon_model.pth")
 
     # Save the wind field image using the environment's built-in function.
-    env_vis = BalloonEnv()
+    env_vis = Balloon2DEnv()
     env_vis.save_wind_field("wind_field.png")
     env_vis.close()
 

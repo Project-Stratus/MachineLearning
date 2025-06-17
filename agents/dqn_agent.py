@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import deque
 
+
 class DQN(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim=64):
         super(DQN, self).__init__()
@@ -26,6 +27,7 @@ class DQN(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
 
 class DQNAgent:
     def __init__(self, state_dim, action_dim, hidden_dim=64, lr=1e-3,
