@@ -3,6 +3,7 @@ import os
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
+import pygame
 
 
 ENVIRONMENT_NAME = "environments/Balloon1D-v0"
@@ -83,4 +84,13 @@ def test() -> None:
             state = next_state
             game_over = terminated or truncated
 
+            if env.render_mode == "human":
+                # pygame backend
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        done = True
+                    else:
+                        done = False
+            if done:
+                game_over = True
     return
