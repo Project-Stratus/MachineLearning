@@ -1,11 +1,8 @@
 import gymnasium as gym
-import numpy as np
 import os
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
-
-import loon_v0
 
 
 ENVIRONMENT_NAME = "loon_v0/LoonEnv-v0"

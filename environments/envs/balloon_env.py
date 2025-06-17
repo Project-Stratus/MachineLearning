@@ -225,7 +225,7 @@ class BalloonEnv(gym.Env):
         done = self.step_count >= EPISODE_LENGTH
         info = {}
         return obs, reward, done, info
-    
+
     def reset(self):
         self.balloon = Balloon()
         self.time = 0.0
