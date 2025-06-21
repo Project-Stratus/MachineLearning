@@ -79,19 +79,14 @@ def test() -> None:
         state, info = env.reset()
         game_over: bool = False
         while not game_over:
-            env.render()
+            # env.render()          # I'm pretty sure this is redundant with render_mode="human"? - AS
             action, _states = model.predict(state, deterministic=True)
             next_state, reward, terminated, truncated, info = env.step(action)
             state = next_state
             game_over = terminated or truncated
 
-            if env.render_mode == "human":
-                # pygame backend
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        done = True
-                    else:
-                        done = False
-            if done:
-                game_over = True
+            if pygame.event.peek(pygame.QUIT):
+                env.close()
+                return
+
     return

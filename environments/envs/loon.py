@@ -33,9 +33,9 @@ class Actions(Enum):
 
 
 class Balloon1DEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 150}
 
-    TIME_MAX = 400
+    TIME_MAX = 1_000
     PUNISHMENT = -400
 
     def __init__(self, render_mode=None):
