@@ -1,3 +1,8 @@
+"""
+Version by WS
+1D env with altitude control
+"""
+
 from enum import Enum
 import gymnasium as gym
 from gymnasium import spaces

@@ -1,3 +1,8 @@
+"""
+Version by AS
+Attempt to combine 1D, 2D and 3D balloon environments into a single file.
+"""
+
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
