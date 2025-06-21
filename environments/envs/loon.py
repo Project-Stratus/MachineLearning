@@ -9,6 +9,7 @@ from gymnasium import spaces
 import pygame
 import numpy as np
 from environments.envs.atmosphere import Atmosphere
+from environments.envs.balloon import Balloon
 
 
 # -------------------------------
@@ -103,10 +104,11 @@ class Balloon1DEnv(gym.Env):
 
         # Randomly initialize the balloon and the atmosphere
         self._atmosphere = Atmosphere()
-        self._balloon = Balloon(self._atmosphere,
-                                mass_balloon=2.0,
-                                altitude=np.random.uniform(low=0, high=self.max_altitude),
-                                velocity=0.0)
+        self._balloon = Balloon(atmosphere=self._atmosphere,
+                                mass=2.0,
+                                # altitude=np.random.uniform(low=0, high=self.max_altitude),
+                                position=[np.random.uniform(0, self.max_altitude)],  # altitude → position[0]
+                                velocity=[0.0])
 
         # Randomly reset the goal
         self.goal = self.np_random.uniform(low=0, high=self.max_altitude)
@@ -238,61 +240,61 @@ class Balloon1DEnv(gym.Env):
 #         return rho
 
 
-class Balloon:
-    """
-    A weather balloon that would be stationary at the initial altitude
-    if its volume were constant, but which now oscillates around that
-    'stationary' volume, causing gentle up-and-down motion.
-    """
-    def __init__(self,
-                 atmosphere:    Atmosphere,
-                 mass_balloon:  float,          # kg, mass of balloon + payload
-                 altitude:      float,          # m (start around 25km)
-                 velocity:      float,          # m/s
-                 ):
+# class Balloon:
+#     """
+#     A weather balloon that would be stationary at the initial altitude
+#     if its volume were constant, but which now oscillates around that
+#     'stationary' volume, causing gentle up-and-down motion.
+#     """
+#     def __init__(self,
+#                  atmosphere:    Atmosphere,
+#                  mass_balloon:  float,          # kg, mass of balloon + payload
+#                  altitude:      float,          # m (start around 25km)
+#                  velocity:      float,          # m/s
+#                  ):
 
-        self.mass_balloon = mass_balloon
-        self.altitude = altitude
-        self.velocity = velocity
+#         self.mass_balloon = mass_balloon
+#         self.altitude = altitude
+#         self.velocity = velocity
 
-        # Atmosphere object for external conditions
-        self.atmosphere = atmosphere
+#         # Atmosphere object for external conditions
+#         self.atmosphere = atmosphere
 
-        # Compute the "stationary volume" that exactly balances
-        # the balloon's weight at this initial altitude:
-        rho_air = self.atmosphere.density(self.altitude)
-        self.volume = self.mass_balloon / rho_air  # Default to a volume that would be stationary
+#         # Compute the "stationary volume" that exactly balances
+#         # the balloon's weight at this initial altitude:
+#         rho_air = self.atmosphere.density(self.altitude)
+#         self.volume = self.mass_balloon / rho_air  # Default to a volume that would be stationary
 
-    def buoyant_force(self):
-        """
-        Buoyant force = (density at altitude) * g * [dynamic volume].
-        """
-        rho_air = self.atmosphere.density(self.altitude)
-        return rho_air * G * self.volume
+#     def buoyant_force(self):
+#         """
+#         Buoyant force = (density at altitude) * g * [dynamic volume].
+#         """
+#         rho_air = self.atmosphere.density(self.altitude)
+#         return rho_air * G * self.volume
 
-    def weight(self):
-        """
-        Weight = mass * g.
-        """
-        return self.mass_balloon * G
+#     def weight(self):
+#         """
+#         Weight = mass * g.
+#         """
+#         return self.mass_balloon * G
 
-    def net_force(self):
-        """
-        Net force = buoyant force - weight.
-        """
-        return self.buoyant_force() - self.weight()
+#     def net_force(self):
+#         """
+#         Net force = buoyant force - weight.
+#         """
+#         return self.buoyant_force() - self.weight()
 
-    def inflate(self, delta_volume):
-        """
-        Inflate or deflate the balloon by a small amount.
-        """
-        self.volume += delta_volume
+#     def inflate(self, delta_volume):
+#         """
+#         Inflate or deflate the balloon by a small amount.
+#         """
+#         self.volume += delta_volume
 
-    def update(self, dt):
-        """
-        Update balloon's velocity and altitude (simple Euler method).
-        """
+#     def update(self, dt):
+#         """
+#         Update balloon's velocity and altitude (simple Euler method).
+#         """
 
-        a = self.net_force() / self.mass_balloon
-        self.velocity += a * dt
-        self.altitude += self.velocity * dt
+#         a = self.net_force() / self.mass_balloon
+#         self.velocity += a * dt
+#         self.altitude += self.velocity * dt
