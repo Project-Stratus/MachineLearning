@@ -11,3 +11,24 @@ etc etc
 
 ### Loon data:
 https://zenodo.org/records/5119968#.YVNdiGZKio5
+
+
+### Testing
+**Actions not active yet**
+Currently tested in github actions:
+- Atmosphere class
+    - Basic init, pressure and density
+- Balloon class
+    - Bouyancy
+    - Inflate, update
+- Balloon1DEnv class
+    - Create instance
+    - Reset 
+    - Step
+    - Runs to completion
+- Balloon2DEnv class
+    - Create instance
+    - Reset
+    - Step
+    - Local wind size
+    - Runs to completion
