@@ -87,16 +87,16 @@ class Balloon:
         amplitude = amplitude_fraction * self.stationary_volume
         phase = 2.0 * np.pi * (t / 60.0)  # one oscillation every 60 seconds
         return self.stationary_volume + amplitude * np.sin(phase)
-    
+
     def buoyant_force(self, t):
         rho_air = self.atmosphere.density(self.y)
         vol = self.dynamic_volume(t)
         F_mag = rho_air * G * vol
         return (0.0, F_mag)
-    
+
     def weight(self):
         return (0.0, -self.mass_balloon * G)
-    
+
     def external_force(self):
         x_idx = np.searchsorted(x_edges, self.x) - 1
         y_idx = np.searchsorted(y_edges, self.y) - 1
@@ -105,7 +105,7 @@ class Balloon:
         Fx = fx_grid[y_idx, x_idx]
         Fy = fy_grid[y_idx, x_idx]
         return (Fx, Fy)
-    
+
     def drag_force(self):
         speed = np.hypot(self.vx, self.vy)
         if speed < 1e-8:
@@ -115,7 +115,7 @@ class Balloon:
         drag_x = -F_drag_mag * (self.vx / speed)
         drag_y = -F_drag_mag * (self.vy / speed)
         return (drag_x, drag_y)
-    
+
     def net_force(self, t):
         Fx_buoy, Fy_buoy = self.buoyant_force(t)
         Fx_wt, Fy_wt = self.weight()
@@ -124,7 +124,7 @@ class Balloon:
         Fx_net = Fx_buoy + Fx_wt + Fx_drag + Fx_ext
         Fy_net = Fy_buoy + Fy_wt + Fy_drag + Fy_ext
         return (Fx_net, Fy_net)
-    
+
     def update(self, t, dt, control_force=(0.0, 0.0)):
         # Add the control force in both x and y directions.
         Fx_net, Fy_net = self.net_force(t)
