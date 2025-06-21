@@ -1,24 +1,24 @@
 name: Test
 
-# on: [push, pull_request]
+on: [push, pull_request]
 
 jobs:
   pytest:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out code
+      - name: Check out code            # Checks out the repository code into ephemeral storage
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python             # Sets up Python environment for the job  
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install requirements
+      - name: Install requirements      # Installs the required Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run unit tests
+      - name: Run unit tests        # Runs the unit tests using pytest
         run: pytest -q

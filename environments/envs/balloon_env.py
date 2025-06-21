@@ -7,6 +7,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import matplotlib.pyplot as plt
+
 from environments.envs.balloon import Balloon
 
 # -------------------------------
@@ -168,10 +169,10 @@ class Balloon2DEnv(gym.Env):
         super(Balloon2DEnv, self).__init__()
         # Observation: [x, y, vx, vy, 18 wind components] → 22 values.
         low_obs = np.concatenate(
-            (np.array([X_RANGE[0], Y_RANGE[0], -200.0, -200.0]), np.full(18, -20.0))
+            (np.array([X_RANGE[0], Y_RANGE[0], -200.0, -200.0], dtype=np.float32), np.full(18, -20.0, dtype=np.float32))    # gym.spaces.Box requires float32 dtype
         )
         high_obs = np.concatenate(
-            (np.array([X_RANGE[1], Y_RANGE[1], 200.0, 200.0]), np.full(18, 20.0))
+            (np.array([X_RANGE[1], Y_RANGE[1], 200.0, 200.0], dtype=np.float32), np.full(18, 20.0, dtype=np.float32))       # gym.spaces.Box requires float32 dtype
         )
         self.observation_space = spaces.Box(
             low=low_obs, high=high_obs, dtype=np.float32
@@ -240,7 +241,7 @@ class Balloon2DEnv(gym.Env):
         return obs, reward, done, info
 
     def reset(self):
-        self.balloon = Balloon()
+        self.balloon = Balloon(dim=2)
         self.time = 0.0
         self.step_count = 0
         local_wind = self.get_local_wind()
@@ -294,7 +295,7 @@ if __name__ == "__main__":
     # Quick test of the environment.
     env = Balloon2DEnv()
     obs = env.reset()
-    for _ in range(10):
+    for _ in range(100):
         obs, reward, done, info = env.step(env.action_space.sample())
         env.render()
         print(f"Obs: {obs}, Reward: {reward}")
