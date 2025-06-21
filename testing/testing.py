@@ -1,6 +1,5 @@
 import gymnasium as gym
-import loon_v0
-from loon_v0.wrappers.policy import MyPolicy
+from environments.wrappers.policy import MyPolicy
 
 if __name__ == "__main__":
 

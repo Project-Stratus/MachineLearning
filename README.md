@@ -8,3 +8,6 @@ Here is the Project Stratus repository for developing and maintaining [name TBC]
 
 ### Getting started
 etc etc
+
+### Loon data:
+https://zenodo.org/records/5119968#.YVNdiGZKio5

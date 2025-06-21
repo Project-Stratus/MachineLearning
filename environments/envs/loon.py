@@ -25,7 +25,7 @@ class Actions(Enum):
     nothing = 2
 
 
-class LoonEnv(gym.Env):
+class Balloon1DEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
     TIME_MAX = 400
@@ -91,7 +91,7 @@ class LoonEnv(gym.Env):
     def reset(self, seed=None, options=None):
         # We need the following line to seed self.np_random
         super().reset(seed=seed)
-        
+
         # Track the number of timesteps in the env
         self._time = 0
 
@@ -123,8 +123,8 @@ class LoonEnv(gym.Env):
 
         # Update the Balloon's position
         self._balloon.update(DT)
-        goal_dist = (1 - abs(self._balloon.altitude - self.goal)/self.max_altitude)**8 # Only give reward if the balloon is close to the goal
-        
+        goal_dist = (1 - abs(self._balloon.altitude - self.goal)/self.max_altitude)**8  # Only reward if balloon is near the goal
+
         # Episodes finish after a number of time steps
         self._time += 1
         terminated = self._balloon.altitude <= 0
@@ -204,10 +204,10 @@ class Atmosphere:
     Simple model of the atmosphere to retrieve pressure and density
     as functions of altitude.
     """
-    def __init__(self, 
-                 p0=P0, 
-                 scale_height=SCALE_HEIGHT, 
-                 temperature=T_AIR, 
+    def __init__(self,
+                 p0=P0,
+                 scale_height=SCALE_HEIGHT,
+                 temperature=T_AIR,
                  molar_mass=M_AIR
                  ):
         self.p0 = p0
@@ -243,8 +243,8 @@ class Balloon:
                  mass_balloon:  float,          # kg, mass of balloon + payload
                  altitude:      float,          # m (start around 25km)
                  velocity:      float,          # m/s
-    ):
-        
+                 ):
+
         self.mass_balloon = mass_balloon
         self.altitude = altitude
         self.velocity = velocity
@@ -255,27 +255,27 @@ class Balloon:
         # Compute the "stationary volume" that exactly balances
         # the balloon's weight at this initial altitude:
         rho_air = self.atmosphere.density(self.altitude)
-        self.volume = self.mass_balloon / rho_air # Default to a volume that would be stationary
-    
+        self.volume = self.mass_balloon / rho_air  # Default to a volume that would be stationary
+
     def buoyant_force(self):
         """
         Buoyant force = (density at altitude) * g * [dynamic volume].
         """
         rho_air = self.atmosphere.density(self.altitude)
         return rho_air * G * self.volume
-    
+
     def weight(self):
         """
         Weight = mass * g.
         """
         return self.mass_balloon * G
-    
+
     def net_force(self):
         """
         Net force = buoyant force - weight.
         """
         return self.buoyant_force() - self.weight()
-    
+
     def inflate(self, delta_volume):
         """
         Inflate or deflate the balloon by a small amount.

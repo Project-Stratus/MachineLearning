@@ -1,16 +1,14 @@
 import gymnasium as gym
-import numpy as np
 import os
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
+import pygame
 
-import loon_v0
 
-
-ENVIRONMENT_NAME = "loon_v0/LoonEnv-v0"
-SAVE_PATH = "./model_saves/"
-VIDEO_PATH = "/performance_video/"
+ENVIRONMENT_NAME = "environments/Balloon1D-v0"
+SAVE_PATH = "./models/ppo_model/"
+VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
 EPISODES = 1000000
@@ -86,4 +84,13 @@ def test() -> None:
             state = next_state
             game_over = terminated or truncated
 
+            if env.render_mode == "human":
+                # pygame backend
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        done = True
+                    else:
+                        done = False
+            if done:
+                game_over = True
     return
