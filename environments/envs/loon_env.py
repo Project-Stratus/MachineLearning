@@ -6,6 +6,7 @@ Attempt to combine 1D, 2D and 3D balloon environments into a single file.
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+from environments.envs.atmosphere import Atmosphere
 
 G = 9.81
 R = 8.314462618
@@ -21,20 +22,20 @@ CD = 0.5
 AREA = 1.0
 
 
-class Atmosphere:
-    """Simple exponential atmosphere model."""
-    def __init__(self, p0=P0, scale_height=SCALE_HEIGHT, temperature=T_AIR, molar_mass=M_AIR):
-        self.p0 = p0
-        self.scale_height = scale_height
-        self.temperature = temperature
-        self.molar_mass = molar_mass
+# class Atmosphere:
+#     """Simple exponential atmosphere model."""
+#     def __init__(self, p0=P0, scale_height=SCALE_HEIGHT, temperature=T_AIR, molar_mass=M_AIR):
+#         self.p0 = p0
+#         self.scale_height = scale_height
+#         self.temperature = temperature
+#         self.molar_mass = molar_mass
 
-    def pressure(self, altitude: float) -> float:
-        return self.p0 * np.exp(-altitude / self.scale_height)
+#     def pressure(self, altitude: float) -> float:
+#         return self.p0 * np.exp(-altitude / self.scale_height)
 
-    def density(self, altitude: float) -> float:
-        p = self.pressure(altitude)
-        return p * self.molar_mass / (R * self.temperature)
+#     def density(self, altitude: float) -> float:
+#         p = self.pressure(altitude)
+#         return p * self.molar_mass / (R * self.temperature)
 
 
 class Balloon:
@@ -279,6 +280,7 @@ y_centers = (y_edges[:-1] + y_edges[1:]) / 2
 x_forces, y_forces = np.meshgrid(x_centers, y_centers)
 fx_grid = (FORCE_MAG / 2) * (np.sin(2 * np.pi * x_forces / (X_RANGE[1] - X_RANGE[0])) + 0.5 * np.sin(4 * np.pi * x_forces / (X_RANGE[1] - X_RANGE[0])))
 fy_grid = (FORCE_MAG / 2) * (np.cos(2 * np.pi * y_forces / (Y_RANGE[1] - Y_RANGE[0])) + 0.5 * np.cos(4 * np.pi * y_forces / (Y_RANGE[1] - Y_RANGE[0])))
+
 
 class Balloon2DEnv(BalloonEnvBase):
     """2D balloon environment using the shared base class."""

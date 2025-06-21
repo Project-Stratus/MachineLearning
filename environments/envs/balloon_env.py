@@ -8,6 +8,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import matplotlib.pyplot as plt
+from environments.envs.atmosphere import Atmosphere
 
 # -------------------------------
 # GLOBAL CONSTANTS
@@ -52,21 +53,22 @@ fy_grid = (FORCE_MAG / 2) * (
 
 # -------------------------------
 # SIMULATION CLASSES
-# -------------------------------
-class Atmosphere:
-    def __init__(self, p0=P0, scale_height=SCALE_HEIGHT, temperature=T_AIR, molar_mass=M_AIR):
-        self.p0 = p0
-        self.scale_height = scale_height
-        self.temperature = temperature
-        self.molar_mass = molar_mass
+# # -------------------------------
+# class Atmosphere:
+#     def __init__(self, p0=P0, scale_height=SCALE_HEIGHT, temperature=T_AIR, molar_mass=M_AIR):
+#         self.p0 = p0
+#         self.scale_height = scale_height
+#         self.temperature = temperature
+#         self.molar_mass = molar_mass
         
-    def pressure(self, altitude):
-        return self.p0 * np.exp(-altitude / self.scale_height)
+#     def pressure(self, altitude):
+#         return self.p0 * np.exp(-altitude / self.scale_height)
     
-    def density(self, altitude):
-        p = self.pressure(altitude)
-        rho = p * self.molar_mass / (R * self.temperature)
-        return rho
+#     def density(self, altitude):
+#         p = self.pressure(altitude)
+#         rho = p * self.molar_mass / (R * self.temperature)
+#         return rho
+
 
 class Balloon:
     def __init__(self, mass_balloon=2.0, x=0.0, y=25000.0, vx=0.0, vy=0.0, atmosphere=None):
@@ -141,6 +143,7 @@ class Balloon:
         if self.y < 0:
             self.y = 0
             self.vy = 0
+
 
 # -------------------------------
 # CUSTOM GYM ENVIRONMENT
@@ -268,7 +271,7 @@ class Balloon2DEnv(gym.Env):
         ax.set_ylabel("Altitude (m)")
         ax.set_xlim(X_RANGE)
         ax.set_ylim(Y_RANGE)
-        q = ax.quiver(x_forces, y_forces, fx_grid, fy_grid, color='blue', alpha=0.5)
+        # q = ax.quiver(x_forces, y_forces, fx_grid, fy_grid, color='blue', alpha=0.5)          # Unused so far
         for xe in x_edges:
             ax.axvline(x=xe, color='gray', linestyle='--', alpha=0.3)
         for ye in y_edges:
@@ -276,9 +279,10 @@ class Balloon2DEnv(gym.Env):
         fig.savefig(filename)
         plt.close(fig)
 
+
 if __name__ == "__main__":
     # Quick test of the environment.
-    env = BalloonEnv()
+    env = Balloon2DEnv()
     obs = env.reset()
     for _ in range(10):
         obs, reward, done, info = env.step(env.action_space.sample())

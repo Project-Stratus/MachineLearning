@@ -11,14 +11,17 @@ if __name__ == "__main__":
     parser.add_argument('model', choices=['ppo', 'dqn'], help='Name of agent to load/train.')
     args = parser.parse_args()
 
-    # If the agent is in testing mode, load the saved model
-    if not args.train:
-        if args.model == 'ppo':
-            ppo.test()
-        else:
-            raise NotImplementedError("DQN not implemented without training.")
-    else:
-        if args.model == 'ppo':
+    if args.model == 'ppo':
+        if args.train:
             ppo.train(verbose=True)
         else:
+            ppo.test()
+
+    elif args.model == 'dqn':
+        if args.train:
             dqn_train(num_episodes=500, target_update=10)
+        else:
+            raise NotImplementedError("Testing mode for DQN is not implemented. Please use the --train flag.")
+
+    else:
+        raise ValueError(f"Unknown model type: {args.model}")
