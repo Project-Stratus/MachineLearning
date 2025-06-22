@@ -1,10 +1,7 @@
 import numpy as np
 
 from environments.envs.atmosphere import Atmosphere
-
-G = 9.81  # gravitational acceleration (m/s^2)
-CD = 0.5  # DOC
-AREA = 1.0  # DOC
+from environments.constants import G, CD, AREA
 
 
 # class Balloon:

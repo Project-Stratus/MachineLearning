@@ -11,19 +11,7 @@ import numpy as np
 from environments.envs.atmosphere import Atmosphere
 from environments.envs.balloon import Balloon
 
-
-# -------------------------------
-# GLOBAL CONSTANTS
-# -------------------------------
-G = 9.81                 # gravitational acceleration (m/s^2)
-R = 8.314462618          # universal gas constant (J/(mol*K))
-T_BALLOON = 273.15 + 20  # internal gas temperature (K) (~20°C)
-T_AIR = 273.15 + 15      # ambient air temperature (K)
-M_AIR = 0.0289647        # molar mass of air (kg/mol)
-P0 = 101325              # sea-level standard atmospheric pressure (Pa)
-SCALE_HEIGHT = 8500      # scale height (m)
-
-DT = 1.0                 # Time step (s)
+from environments.constants import DT, VOL_MAX, ALT_MAX, VEL_MAX, P_MAX
 
 
 class Actions(Enum):
@@ -42,10 +30,14 @@ class Balloon1DEnv(gym.Env):
         self.window_size = 512  # The size of the PyGame window
 
         # Define ranges for each observation
-        self.max_volume = 20.0
-        self.max_altitude = 20000.0
-        self.max_velocity = 50.0
-        self.max_pressure = 100000
+        # self.max_volume = 20.0
+        # self.max_altitude = 20000.0
+        # self.max_velocity = 50.0
+        # self.max_pressure = 100000
+        self.max_volume = VOL_MAX
+        self.max_altitude = ALT_MAX
+        self.max_velocity = VEL_MAX
+        self.max_pressure = P_MAX
 
         # Observations are dictionaries with the agent's and the target's location.
         self.observation_space = spaces.Dict(

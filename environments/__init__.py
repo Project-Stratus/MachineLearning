@@ -1,4 +1,5 @@
 from gymnasium.envs.registration import register
+from environments.constants import *
 
 register(
     id="environments/Balloon1D-v0",

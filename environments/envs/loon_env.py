@@ -7,19 +7,20 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from environments.envs.balloon import Balloon
+from environments.constants import DT, EPISODE_LENGTH
 
-G = 9.81
-R = 8.314462618
-T_BALLOON = 273.15 + 20
-T_AIR = 273.15 + 15
-M_AIR = 0.0289647
-P0 = 101325
-SCALE_HEIGHT = 8500
+# G = 9.81
+# R = 8.314462618
+# T_BALLOON = 273.15 + 20
+# T_AIR = 273.15 + 15
+# M_AIR = 0.0289647
+# P0 = 101325
+# SCALE_HEIGHT = 8500
 
-DT = 1.0
-EPISODE_LENGTH = 300
-CD = 0.5
-AREA = 1.0
+# DT = 1.0
+# EPISODE_LENGTH = 300
+# CD = 0.5
+# AREA = 1.0
 
 
 # class Atmosphere:

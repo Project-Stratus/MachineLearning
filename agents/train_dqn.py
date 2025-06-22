@@ -27,7 +27,7 @@ def train(num_episodes=500, target_update=10):
     epsilon_history = []
 
     for episode in range(num_episodes):
-        state = env.reset()
+        state, info = env.reset()
         episode_reward = 0.0
         done = False
 
@@ -76,7 +76,7 @@ def train(num_episodes=500, target_update=10):
 
     # Run one test episode to record the balloon's trajectory.
     test_states = []
-    state = env.reset()
+    state, info = env.reset()
     done = False
     while not done:
         test_states.append((env.balloon.x, env.balloon.y))
@@ -119,7 +119,8 @@ def train(num_episodes=500, target_update=10):
     anim = animation.FuncAnimation(fig_anim, animate_balloon,
                                    frames=len(test_states), interval=50, blit=True)
     # Save the animation as an MP4 file. Change writer or filename as desired.
-    anim.save("balloon_animation.mp4", writer="ffmpeg")
+    anim.save("balloon_animation.gif", writer="pillow")
+    print("Animation saved as 'balloon_animation.gif'. Update to .mp4 later.")
     plt.close(fig_anim)
 
     return agent

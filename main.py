@@ -1,5 +1,6 @@
 import agents.ppo as ppo
 from agents.train_dqn import train as dqn_train
+from agents.test_dqn import dqn_test
 import argparse
 
 
@@ -21,7 +22,8 @@ if __name__ == "__main__":
         if args.train:
             dqn_train(num_episodes=500, target_update=10)
         else:
-            raise NotImplementedError("Testing mode for DQN is not implemented. Please use the --train flag.")
+            # raise NotImplementedError("Testing mode for DQN is not implemented. Please use the --train flag.")
+            dqn_test()
 
     else:
         raise ValueError(f"Unknown model type: {args.model}")

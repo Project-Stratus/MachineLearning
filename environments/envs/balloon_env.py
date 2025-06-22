@@ -9,24 +9,25 @@ from gymnasium import spaces
 import matplotlib.pyplot as plt
 
 from environments.envs.balloon import Balloon
+from environments.constants import DT, SEED
 
 # -------------------------------
 # GLOBAL CONSTANTS
 # -------------------------------
-G = 9.81  # gravitational acceleration (m/s²)
-R = 8.314462618  # universal gas constant (J/(mol·K))
-T_BALLOON = 273.15 + 20  # internal gas temperature (K)
-T_AIR = 273.15 + 15  # ambient air temperature (K)
-M_AIR = 0.0289647  # molar mass of air (kg/mol)
-P0 = 101325  # sea-level atmospheric pressure (Pa)
-SCALE_HEIGHT = 8500  # scale height (m)
+# G = 9.81  # gravitational acceleration (m/s²)
+# R = 8.314462618  # universal gas constant (J/(mol·K))
+# T_BALLOON = 273.15 + 20  # internal gas temperature (K)
+# T_AIR = 273.15 + 15  # ambient air temperature (K)
+# M_AIR = 0.0289647  # molar mass of air (kg/mol)
+# P0 = 101325  # sea-level atmospheric pressure (Pa)
+# SCALE_HEIGHT = 8500  # scale height (m)
 
-DT = 1.0  # simulation time step (s)
+# DT = 1.0  # simulation time step (s)
 EPISODE_LENGTH = 300  # max steps per episode
 
 # Drag parameters
-CD = 0.5
-AREA = 1.0
+# CD = 0.5
+# AREA = 1.0
 
 # Force grid parameters (for the wind field)
 GRID_CELLS = 40
@@ -163,9 +164,10 @@ class Balloon2DEnv(gym.Env):
           Negative Euclidean distance from the balloon's position to the target (0, 25000).
     """
 
-    metadata = {"render.modes": ["human"]}
+    # metadata = {"render.modes": ["human"]}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self):
+    def __init__(self, render_mode=None):
         super(Balloon2DEnv, self).__init__()
         # Observation: [x, y, vx, vy, 18 wind components] → 22 values.
         low_obs = np.concatenate(
@@ -191,10 +193,14 @@ class Balloon2DEnv(gym.Env):
         self.step_count = 0
 
         # For rendering.
-        self.fig = None
-        self.ax = None
-        self.circle = None
-        self.target_marker = None
+        # self.fig = None
+        # self.ax = None
+        # self.circle = None
+        # self.target_marker = None
+        assert render_mode is None or render_mode in self.metadata["render_modes"]
+        self.render_mode = render_mode
+        self.window = None
+        self.clock = None
 
     def get_local_wind(self):
         """
@@ -240,11 +246,20 @@ class Balloon2DEnv(gym.Env):
         info = {}
         return obs, reward, done, info
 
-    def reset(self):
-        self.balloon = Balloon(dim=2)
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        # ---- 1. sample a random start position ------------------------
+        while True:
+            x0 = self.np_random.uniform(*X_RANGE)
+            y0 = self.np_random.uniform(*Y_RANGE)
+            if np.hypot(x0 - self.target_x, y0 - self.target_y) > 500.0:
+                break
+
+        self.balloon = Balloon(dim=2, position=[x0, y0], velocity=[0.0, 0.0])
         self.time = 0.0
         self.step_count = 0
         local_wind = self.get_local_wind()
+        info = {"seed": seed}
         return np.concatenate(
             (
                 np.array(
@@ -252,28 +267,138 @@ class Balloon2DEnv(gym.Env):
                 ),
                 local_wind,
             )
-        )
+        ), info
+
+    # def render(self, mode="human"):
+    #     if self.fig is None:
+    #         self.fig, self.ax = plt.subplots()
+    #         self.ax.set_title("Balloon Environment")
+    #         self.ax.set_xlabel("X position (m)")
+    #         self.ax.set_ylabel("Altitude (m)")
+    #         self.ax.set_xlim(X_RANGE)
+    #         self.ax.set_ylim(Y_RANGE)
+    #         self.circle = plt.Circle((self.balloon.x, self.balloon.y), 50, color="red")
+    #         self.ax.add_patch(self.circle)
+    #         # Plot target marker.
+    #         (self.target_marker,) = self.ax.plot(
+    #             self.target_x, self.target_y, marker="*", color="green", markersize=15
+    #         )
+    #     self.circle.center = (self.balloon.x, self.balloon.y)
+    #     plt.pause(0.001)
+
+    # def close(self):
+    #     if self.fig:
+    #         plt.close(self.fig)
 
     def render(self, mode="human"):
-        if self.fig is None:
-            self.fig, self.ax = plt.subplots()
-            self.ax.set_title("Balloon Environment")
-            self.ax.set_xlabel("X position (m)")
-            self.ax.set_ylabel("Altitude (m)")
-            self.ax.set_xlim(X_RANGE)
-            self.ax.set_ylim(Y_RANGE)
-            self.circle = plt.Circle((self.balloon.x, self.balloon.y), 50, color="red")
-            self.ax.add_patch(self.circle)
-            # Plot target marker.
-            (self.target_marker,) = self.ax.plot(
-                self.target_x, self.target_y, marker="*", color="green", markersize=15
+        if mode not in self.metadata["render_modes"]:
+            raise ValueError(f"Invalid render mode: {mode}. ")
+        self.render_mode = mode
+        return self._render_frame()
+
+    def _render_frame(self):
+        # --------- 1. Lazy window / clock creation ----------
+        if self.window is None and self.render_mode == "human":
+            import pygame
+            pygame.init()
+            pygame.display.init()
+            # choose a square window or keep aspect ratio; here 600×600
+            self.window_size = 600
+            self.window = pygame.display.set_mode((self.window_size, self.window_size))
+        if self.clock is None and self.render_mode == "human":
+            self.clock = pygame.time.Clock()
+
+        import pygame
+        canvas = pygame.Surface((self.window_size, self.window_size))
+        canvas.fill((255, 255, 255))  # white background
+
+        # --------- 2. Coordinate transform helpers ----------
+        def to_screen(x_m, y_m):
+            """Convert world metres to screen pixels (origin top-left)."""
+            sx = (x_m - X_RANGE[0]) / (X_RANGE[1] - X_RANGE[0])
+            sy = (y_m - Y_RANGE[0]) / (Y_RANGE[1] - Y_RANGE[0])
+            # flip y because Pygame's y grows downward
+            return (int(sx * self.window_size),
+                    int((1.0 - sy) * self.window_size))
+
+        # --------- 3. Draw balloon  -------------------------
+        bx, by = to_screen(self.balloon.x, self.balloon.y)
+        pygame.draw.circle(canvas, (255, 0, 0), (bx, by), 10)
+
+        # --------- 4. Draw target ---------------------------
+        tx, ty = to_screen(self.target_x, self.target_y)
+        pygame.draw.circle(canvas, (0, 255, 0), (tx, ty), 5)
+
+        # --------- 4.5  Draw wind arrows -----------------------------
+        # Convert each grid centre (x_forces, y_forces) to screen space,
+        # scale the wind vector for visibility, and draw an arrow.
+        ARROW_COLOR = (0, 128, 255)    # light blue
+        ARROW_SCALE = 0.1              # metres → pixels (tweak to taste)
+        HEAD_ANGLE = np.radians(23)    # opening angle of the arrow head
+        HEAD_LEN = 8                   # pixels
+        STEP = 3                       # subsample factor
+
+        # fx_grid, fy_grid, x_forces, y_forces are 2-D numpy arrays
+        for j in range(0, GRID_CELLS, STEP):
+            for i in range(0, GRID_CELLS, STEP):
+                fx = fx_grid[j, i]
+                fy = fy_grid[j, i]
+                if fx == 0.0 and fy == 0.0:
+                    continue
+
+                # start point = centre of that grid cell
+                x0 = x_forces[j, i]
+                y0 = y_forces[j, i]
+                x1 = x0 + fx / ARROW_SCALE      # tip point in metres
+                y1 = y0 + fy / ARROW_SCALE
+
+                sx0, sy0 = to_screen(x0, y0)
+                sx1, sy1 = to_screen(x1, y1)
+                # pygame.draw.line(canvas, ARROW_COLOR, (sx0, sy0), (sx1, sy1), 1)
+
+                # main shaft
+                pygame.draw.line(canvas, ARROW_COLOR, (sx0, sy0), (sx1, sy1), 1)
+
+                # direction unit vector in screen space
+                dx, dy = sx1 - sx0, sy1 - sy0
+                # length = np.hypot(dx, dy)
+                # if length == 0:
+                if dx == 0 and dy == 0:
+                    continue
+
+                base_angle = np.arctan2(dy, dx)  # angle of the arrow shaft
+                left_angle = base_angle + HEAD_ANGLE
+                right_angle = base_angle - HEAD_ANGLE
+
+                lx = sx1 - HEAD_LEN * np.cos(left_angle)
+                ly = sy1 - HEAD_LEN * np.sin(left_angle)
+                rx = sx1 - HEAD_LEN * np.cos(right_angle)
+                ry = sy1 - HEAD_LEN * np.sin(right_angle)
+
+                pygame.draw.line(canvas, ARROW_COLOR, (sx1, sy1), (lx, ly), 1)
+                pygame.draw.line(canvas, ARROW_COLOR, (sx1, sy1), (rx, ry), 1)
+
+        # --------- 5. Blit & cap FPS ------------------------
+        if self.render_mode == "human":
+            self.window.blit(canvas, canvas.get_rect())
+            pygame.display.update()
+            pygame.event.pump()
+            for e in pygame.event.get(pygame.QUIT):
+                self.close()
+                raise SystemExit
+            self.clock.tick(self.metadata["render_fps"])
+        else:  # rgb_array
+            return np.transpose(
+                np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
             )
-        self.circle.center = (self.balloon.x, self.balloon.y)
-        plt.pause(0.001)
 
     def close(self):
-        if self.fig:
-            plt.close(self.fig)
+        if self.window is not None:
+            import pygame
+            pygame.display.quit()
+            pygame.quit()
+            self.window = None
+            self.clock = None
 
     def save_wind_field(self, filename="wind_field.png"):
         fig, ax = plt.subplots(figsize=(8, 6))
