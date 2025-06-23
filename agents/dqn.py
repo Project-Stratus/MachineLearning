@@ -88,12 +88,13 @@ def test(episodes: int = 10) -> None:
     model = DQN.load(MODEL_FILE, device=device)
 
     for _ in range(episodes):
-        obs, _ = env.reset()
+        state, _ = env.reset()
         done = False
         while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, _, terminated, truncated, _ = env.step(action)
+            action, _ = model.predict(state, deterministic=True)
+            next_state, _, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
+            state = next_state
 
             if pygame.event.peek(pygame.QUIT):
                 env.close()

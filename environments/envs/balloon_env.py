@@ -86,6 +86,9 @@ class Balloon2DEnv(gym.Env):
         self.time = 0.0
         self.step_count = 0
 
+        assert render_mode is None or render_mode in self.metadata["render_modes"]
+        self.render_mode = render_mode
+
         # For rendering.
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -135,7 +138,12 @@ class Balloon2DEnv(gym.Env):
         # done = self.step_count >= EPISODE_LENGTH
         terminated = False
         truncated = self.step_count >= EPISODE_LENGTH
+
         info = {}
+
+        if self.render_mode == "human":
+            self._render_frame()
+
         return obs, reward, terminated, truncated, info
 
     def reset(self, seed=None, options=None):
@@ -162,10 +170,8 @@ class Balloon2DEnv(gym.Env):
         ), info
 
     def render(self, mode="human"):
-        if mode not in self.metadata["render_modes"]:
-            raise ValueError(f"Invalid render mode: {mode}. ")
-        self.render_mode = mode
-        return self._render_frame()
+        if self.render_mode == "rgb_array":
+            return self._render_frame()
 
     def _render_frame(self):
         # --------- 1. Lazy window / clock creation ----------

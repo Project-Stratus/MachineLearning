@@ -1,3 +1,7 @@
+"""
+Pytest unit tests for the environments in the `environments.envs` package.
+"""
+
 import math
 import pytest
 import numpy as np
@@ -5,7 +9,7 @@ import numpy as np
 from environments.envs.atmosphere import Atmosphere
 from environments.envs.balloon import Balloon
 from environments.envs.loon import Balloon1DEnv
-from environments.envs.balloon_env import Balloon2DEnv   # adjust import to your tree
+from environments.envs.balloon_env import Balloon2DEnv
 
 
 # ---------------------------------------------------------------------
