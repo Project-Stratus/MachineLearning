@@ -9,25 +9,12 @@ from gymnasium import spaces
 import matplotlib.pyplot as plt
 
 from environments.envs.balloon import Balloon
-from environments.constants import DT, SEED
+from environments.constants import DT
 
 # -------------------------------
 # GLOBAL CONSTANTS
 # -------------------------------
-# G = 9.81  # gravitational acceleration (m/s²)
-# R = 8.314462618  # universal gas constant (J/(mol·K))
-# T_BALLOON = 273.15 + 20  # internal gas temperature (K)
-# T_AIR = 273.15 + 15  # ambient air temperature (K)
-# M_AIR = 0.0289647  # molar mass of air (kg/mol)
-# P0 = 101325  # sea-level atmospheric pressure (Pa)
-# SCALE_HEIGHT = 8500  # scale height (m)
-
-# DT = 1.0  # simulation time step (s)
 EPISODE_LENGTH = 300  # max steps per episode
-
-# Drag parameters
-# CD = 0.5
-# AREA = 1.0
 
 # Force grid parameters (for the wind field)
 GRID_CELLS = 40
@@ -51,99 +38,6 @@ fy_grid = (FORCE_MAG / 2) * (
     np.cos(2 * np.pi * y_forces / (Y_RANGE[1] - Y_RANGE[0]))
     + 0.5 * np.cos(4 * np.pi * y_forces / (Y_RANGE[1] - Y_RANGE[0]))
 )
-
-# -------------------------------
-# SIMULATION CLASSES
-# # -------------------------------
-# class Atmosphere:
-#     def __init__(self, p0=P0, scale_height=SCALE_HEIGHT, temperature=T_AIR, molar_mass=M_AIR):
-#         self.p0 = p0
-#         self.scale_height = scale_height
-#         self.temperature = temperature
-#         self.molar_mass = molar_mass
-
-#     def pressure(self, altitude):
-#         return self.p0 * np.exp(-altitude / self.scale_height)
-
-#     def density(self, altitude):
-#         p = self.pressure(altitude)
-#         rho = p * self.molar_mass / (R * self.temperature)
-#         return rho
-
-
-# class Balloon:
-#     def __init__(self, mass_balloon=2.0, x=0.0, y=25000.0, vx=0.0, vy=0.0, atmosphere=None):
-#         self.mass_balloon = mass_balloon
-#         self.x = x
-#         self.y = y
-#         self.vx = vx
-#         self.vy = vy
-#         self.atmosphere = atmosphere if atmosphere is not None else Atmosphere()
-#         # Stationary volume based on initial air density.
-#         rho_air = self.atmosphere.density(self.y)
-#         self.stationary_volume = self.mass_balloon / rho_air
-
-#     def dynamic_volume(self, t):
-#         amplitude_fraction = 0.05
-#         amplitude = amplitude_fraction * self.stationary_volume
-#         phase = 2.0 * np.pi * (t / 60.0)  # one oscillation every 60 seconds
-#         return self.stationary_volume + amplitude * np.sin(phase)
-
-#     def buoyant_force(self, t):
-#         rho_air = self.atmosphere.density(self.y)
-#         vol = self.dynamic_volume(t)
-#         F_mag = rho_air * G * vol
-#         return (0.0, F_mag)
-
-#     def weight(self):
-#         return (0.0, -self.mass_balloon * G)
-
-#     def external_force(self):
-#         x_idx = np.searchsorted(x_edges, self.x) - 1
-#         y_idx = np.searchsorted(y_edges, self.y) - 1
-#         x_idx = np.clip(x_idx, 0, GRID_CELLS - 1)
-#         y_idx = np.clip(y_idx, 0, GRID_CELLS - 1)
-#         Fx = fx_grid[y_idx, x_idx]
-#         Fy = fy_grid[y_idx, x_idx]
-#         return (Fx, Fy)
-
-#     def drag_force(self):
-#         speed = np.hypot(self.vx, self.vy)
-#         if speed < 1e-8:
-#             return (0.0, 0.0)
-#         rho_air = self.atmosphere.density(self.y)
-#         F_drag_mag = 0.5 * CD * AREA * rho_air * speed**2
-#         drag_x = -F_drag_mag * (self.vx / speed)
-#         drag_y = -F_drag_mag * (self.vy / speed)
-#         return (drag_x, drag_y)
-
-#     def net_force(self, t):
-#         Fx_buoy, Fy_buoy = self.buoyant_force(t)
-#         Fx_wt, Fy_wt = self.weight()
-#         Fx_drag, Fy_drag = self.drag_force()
-#         Fx_ext, Fy_ext = self.external_force()
-#         Fx_net = Fx_buoy + Fx_wt + Fx_drag + Fx_ext
-#         Fy_net = Fy_buoy + Fy_wt + Fy_drag + Fy_ext
-#         return (Fx_net, Fy_net)
-
-#     def update(self, t, dt, control_force=(0.0, 0.0)):
-#         # Add the control force in both x and y directions.
-#         Fx_net, Fy_net = self.net_force(t)
-#         Fx_net += control_force[0]
-#         Fy_net += control_force[1]
-#         ax = Fx_net / self.mass_balloon
-#         ay = Fy_net / self.mass_balloon
-#         self.vx += ax * dt
-#         self.vy += ay * dt
-#         # Clamp velocities to prevent runaway speeds.
-#         max_velocity = 200.0
-#         self.vx = np.clip(self.vx, -max_velocity, max_velocity)
-#         self.vy = np.clip(self.vy, -max_velocity, max_velocity)
-#         self.x += self.vx * dt
-#         self.y += self.vy * dt
-#         if self.y < 0:
-#             self.y = 0
-#             self.vy = 0
 
 
 # -------------------------------
@@ -193,10 +87,6 @@ class Balloon2DEnv(gym.Env):
         self.step_count = 0
 
         # For rendering.
-        # self.fig = None
-        # self.ax = None
-        # self.circle = None
-        # self.target_marker = None
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
         self.window = None
@@ -242,9 +132,11 @@ class Balloon2DEnv(gym.Env):
         dx = self.balloon.x - self.target_x
         dy = self.balloon.y - self.target_y
         reward = -np.sqrt(dx * dx + dy * dy)
-        done = self.step_count >= EPISODE_LENGTH
+        # done = self.step_count >= EPISODE_LENGTH
+        terminated = False
+        truncated = self.step_count >= EPISODE_LENGTH
         info = {}
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -268,27 +160,6 @@ class Balloon2DEnv(gym.Env):
                 local_wind,
             )
         ), info
-
-    # def render(self, mode="human"):
-    #     if self.fig is None:
-    #         self.fig, self.ax = plt.subplots()
-    #         self.ax.set_title("Balloon Environment")
-    #         self.ax.set_xlabel("X position (m)")
-    #         self.ax.set_ylabel("Altitude (m)")
-    #         self.ax.set_xlim(X_RANGE)
-    #         self.ax.set_ylim(Y_RANGE)
-    #         self.circle = plt.Circle((self.balloon.x, self.balloon.y), 50, color="red")
-    #         self.ax.add_patch(self.circle)
-    #         # Plot target marker.
-    #         (self.target_marker,) = self.ax.plot(
-    #             self.target_x, self.target_y, marker="*", color="green", markersize=15
-    #         )
-    #     self.circle.center = (self.balloon.x, self.balloon.y)
-    #     plt.pause(0.001)
-
-    # def close(self):
-    #     if self.fig:
-    #         plt.close(self.fig)
 
     def render(self, mode="human"):
         if mode not in self.metadata["render_modes"]:

@@ -7,11 +7,8 @@ Play back a trained DQN controller in the 2-D balloon environment.
 • Close the window or press Ctrl-C to abort early.
 """
 
-# import os
 import sys
 from pathlib import Path
-import time
-# import numpy as np
 import torch
 
 from agents.dqn_agent import DQNAgent

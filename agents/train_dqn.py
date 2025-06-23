@@ -1,5 +1,5 @@
 """
-train.py
+train_dqn.py
 
 Trains a DQN agent on the BalloonEnv.
 The agent learns to apply a vertical control force to keep the balloon near its target altitude.
@@ -12,7 +12,7 @@ import torch
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from environments.envs.balloon_env import Balloon2DEnv, X_RANGE, Y_RANGE, x_forces, y_forces, fx_grid, fy_grid, x_edges, y_edges
+from environments.envs.balloon_env import Balloon2DEnv, X_RANGE, Y_RANGE, x_forces, y_forces, fx_grid, fy_grid, x_edges, y_edges    # noqa
 
 from agents.dqn_agent import DQNAgent
 
@@ -92,7 +92,7 @@ def train(num_episodes=500, target_update=10):
     ax.set_xlim(X_RANGE)
     ax.set_ylim(Y_RANGE)
     # Draw the wind field.
-    q = ax.quiver(x_forces, y_forces, fx_grid, fy_grid, color='blue', alpha=0.5)
+    # q = ax.quiver(x_forces, y_forces, fx_grid, fy_grid, color='blue', alpha=0.5)
     test_states_arr = np.array(test_states)
     ax.plot(test_states_arr[:, 0], test_states_arr[:, 1], marker='o', color='red', linewidth=2, markersize=4)
     plt.savefig("balloon_trajectory.png")

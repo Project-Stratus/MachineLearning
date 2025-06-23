@@ -2,12 +2,6 @@ import numpy as np
 
 from environments.constants import SCALE_HEIGHT, P0, R, T_AIR, M_AIR
 
-# SCALE_HEIGHT = 8500      # scale height (m)
-# P0 = 101325              # sea-level atmospheric pressure (Pa)
-# R = 8.314462618          # universal gas constant (J/(mol·K))
-# T_AIR = 273.15 + 15      # ambient air temperature (K)
-# M_AIR = 0.0289647        # molar mass of air (kg/mol)
-
 
 class Atmosphere:
     """
