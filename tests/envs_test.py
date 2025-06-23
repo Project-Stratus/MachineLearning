@@ -126,7 +126,7 @@ def env_2d():
 
 # Reset
 def test_2d_reset_shape(env_2d):
-    obs = env_2d.reset()
+    obs, info = env_2d.reset()
     assert obs.shape == (22,), "Observation should be 22-dim flat vector"
     # First four entries are x, y, vx, vy.
     x, y, vx, vy = obs[:4]
@@ -137,14 +137,14 @@ def test_2d_reset_shape(env_2d):
 def test_2d_single_step(env_2d):
     env_2d.reset()
     a = env_2d.action_space.sample()
-    obs, reward, done, info = env_2d.step(a)
+    obs, reward, terminated, truncated, info = env_2d.step(a)
 
     # Observation OK?
     assert obs.shape == (22,)
     # Reward finite (should be <= 0 except when exactly on target).
     assert np.isfinite(reward)
     # done is bool or numpy.bool_
-    assert isinstance(done, (bool, np.bool_))
+    assert isinstance(terminated, (bool, np.bool_))
     assert isinstance(info, dict)
 
 
@@ -163,7 +163,8 @@ def test_2d_runs_until_done(env_2d):
     max_rollout = 5_000            # should far exceed EPISODE_LENGTH
     done = False
     for _ in range(max_rollout):
-        _, _, done, _ = env_2d.step(env_2d.action_space.sample())
-        if done:
+        _, _, terminated, truncated, _ = env_2d.step(env_2d.action_space.sample())
+        if terminated or truncated:
+            done = True
             break
     assert done, "Episode should finish within EPISODE_LENGTH steps"
