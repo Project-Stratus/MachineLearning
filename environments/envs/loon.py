@@ -1,22 +1,17 @@
+"""
+Version by WS
+1D env with altitude control
+"""
+
 from enum import Enum
 import gymnasium as gym
 from gymnasium import spaces
 import pygame
 import numpy as np
+from environments.envs.atmosphere import Atmosphere
+from environments.envs.balloon import Balloon
 
-
-# -------------------------------
-# GLOBAL CONSTANTS
-# -------------------------------
-G = 9.81                 # gravitational acceleration (m/s^2)
-R = 8.314462618          # universal gas constant (J/(mol*K))
-T_BALLOON = 273.15 + 20  # internal gas temperature (K) (~20°C)
-T_AIR = 273.15 + 15      # ambient air temperature (K)
-M_AIR = 0.0289647        # molar mass of air (kg/mol)
-P0 = 101325              # sea-level standard atmospheric pressure (Pa)
-SCALE_HEIGHT = 8500      # scale height (m)
-
-DT = 1.0                 # Time step (s)
+from environments.constants import DT, VOL_MAX, ALT_MAX, VEL_MAX, P_MAX
 
 
 class Actions(Enum):
@@ -26,19 +21,19 @@ class Actions(Enum):
 
 
 class Balloon1DEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 150}
 
-    TIME_MAX = 400
+    TIME_MAX = 1_000
     PUNISHMENT = -400
 
     def __init__(self, render_mode=None):
         self.window_size = 512  # The size of the PyGame window
 
         # Define ranges for each observation
-        self.max_volume = 20.0
-        self.max_altitude = 20000.0
-        self.max_velocity = 50.0
-        self.max_pressure = 100000
+        self.max_volume = VOL_MAX
+        self.max_altitude = ALT_MAX
+        self.max_velocity = VEL_MAX
+        self.max_pressure = P_MAX
 
         # Observations are dictionaries with the agent's and the target's location.
         self.observation_space = spaces.Dict(
@@ -97,10 +92,11 @@ class Balloon1DEnv(gym.Env):
 
         # Randomly initialize the balloon and the atmosphere
         self._atmosphere = Atmosphere()
-        self._balloon = Balloon(self._atmosphere,
-                                mass_balloon=2.0,
-                                altitude=np.random.uniform(low=0, high=self.max_altitude),
-                                velocity=0.0)
+        self._balloon = Balloon(atmosphere=self._atmosphere,
+                                mass=2.0,
+                                # altitude=np.random.uniform(low=0, high=self.max_altitude),
+                                position=[np.random.uniform(0, self.max_altitude)],  # altitude → position[0]
+                                velocity=[0.0])
 
         # Randomly reset the goal
         self.goal = self.np_random.uniform(low=0, high=self.max_altitude)
@@ -197,96 +193,3 @@ class Balloon1DEnv(gym.Env):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
-
-
-class Atmosphere:
-    """
-    Simple model of the atmosphere to retrieve pressure and density
-    as functions of altitude.
-    """
-    def __init__(self,
-                 p0=P0,
-                 scale_height=SCALE_HEIGHT,
-                 temperature=T_AIR,
-                 molar_mass=M_AIR
-                 ):
-        self.p0 = p0
-        self.scale_height = scale_height
-        self.temperature = temperature
-        self.molar_mass = molar_mass
-
-    def pressure(self, altitude):
-        """
-        Returns external pressure (Pa) at a given altitude
-        using the exponential model: P(h) = P0 * exp(-h/H).
-        """
-        return self.p0 * np.exp(-altitude / self.scale_height)
-
-    def density(self, altitude):
-        """
-        Returns air density (kg/m^3) at a given altitude
-        via the ideal gas law: rho = P * M_air / (R * T).
-        """
-        p = self.pressure(altitude)
-        rho = p * self.molar_mass / (R * self.temperature)
-        return rho
-
-
-class Balloon:
-    """
-    A weather balloon that would be stationary at the initial altitude
-    if its volume were constant, but which now oscillates around that
-    'stationary' volume, causing gentle up-and-down motion.
-    """
-    def __init__(self,
-                 atmosphere:    Atmosphere,
-                 mass_balloon:  float,          # kg, mass of balloon + payload
-                 altitude:      float,          # m (start around 25km)
-                 velocity:      float,          # m/s
-                 ):
-
-        self.mass_balloon = mass_balloon
-        self.altitude = altitude
-        self.velocity = velocity
-
-        # Atmosphere object for external conditions
-        self.atmosphere = atmosphere
-
-        # Compute the "stationary volume" that exactly balances
-        # the balloon's weight at this initial altitude:
-        rho_air = self.atmosphere.density(self.altitude)
-        self.volume = self.mass_balloon / rho_air  # Default to a volume that would be stationary
-
-    def buoyant_force(self):
-        """
-        Buoyant force = (density at altitude) * g * [dynamic volume].
-        """
-        rho_air = self.atmosphere.density(self.altitude)
-        return rho_air * G * self.volume
-
-    def weight(self):
-        """
-        Weight = mass * g.
-        """
-        return self.mass_balloon * G
-
-    def net_force(self):
-        """
-        Net force = buoyant force - weight.
-        """
-        return self.buoyant_force() - self.weight()
-
-    def inflate(self, delta_volume):
-        """
-        Inflate or deflate the balloon by a small amount.
-        """
-        self.volume += delta_volume
-
-    def update(self, dt):
-        """
-        Update balloon's velocity and altitude (simple Euler method).
-        """
-
-        a = self.net_force() / self.mass_balloon
-        self.velocity += a * dt
-        self.altitude += self.velocity * dt

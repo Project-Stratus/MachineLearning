@@ -1,6 +1,11 @@
 import gymnasium as gym
 from environments.wrappers.policy import MyPolicy
 
+"""
+Initially called "testing.py", renamed when pytest was brought in
+"""
+
+
 if __name__ == "__main__":
 
     env = gym.make("loon_v0/LoonEnv-v0", render_mode="human")
