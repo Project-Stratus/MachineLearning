@@ -21,10 +21,8 @@ if __name__ == "__main__":
 
     elif args.model == 'dqn':
         if args.train:
-            # dqn_train(num_episodes=500, target_update=10)
             dqn.train()
         else:
-            # dqn_test()
             dqn.test()
 
     else:

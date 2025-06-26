@@ -24,9 +24,7 @@ class Balloon:
         atmosphere: Atmosphere | None = None,
         oscillate: bool = False,
     ):
-        assert dim in (1, 2), (
-            f"Only 1-D or 2-D motion is supported by the envs. Got dim={dim}."
-        )
+
         self.dim = dim
         self.mass = mass
         self.atmosphere = atmosphere if atmosphere is not None else Atmosphere()

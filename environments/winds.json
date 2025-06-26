@@ -1,0 +1,21 @@
+{
+  "sinusoid": {
+    "wind_pattern": "sin",
+    "wind_mag": 10
+  },
+
+  "linear_right": {
+    "wind_pattern": "linear_x",
+    "wind_mag": 8
+  },
+
+  "linear_up": {
+    "wind_pattern": "linear_z",
+    "wind_mag": 6
+  },
+
+  "split_fork": {
+    "wind_pattern": "split",
+    "wind_mag": 12
+  }
+}

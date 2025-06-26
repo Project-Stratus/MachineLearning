@@ -12,7 +12,7 @@ import torch
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from environments.envs.balloon_env import Balloon2DEnv, X_RANGE, Y_RANGE, x_forces, y_forces, fx_grid, fy_grid, x_edges, y_edges    # noqa
+from environments.envs.balloon_2d_env import Balloon2DEnv, X_RANGE, Y_RANGE, x_forces, y_forces, fx_grid, fy_grid, x_edges, y_edges    # noqa
 
 from agents.dqn_agent import DQNAgent
 
