@@ -54,7 +54,7 @@ def train(num_episodes=500, target_update=10):
     plt.xlabel("Episode")
     plt.ylabel("Total Reward")
     plt.title("Training Reward History")
-    plt.savefig("reward_history.png")
+    plt.savefig("figs/dqn_figs/reward_history.png")
     plt.close()
 
     # Save epsilon decay plot.
@@ -63,15 +63,15 @@ def train(num_episodes=500, target_update=10):
     plt.xlabel("Episode")
     plt.ylabel("Epsilon")
     plt.title("Epsilon Decay Over Episodes")
-    plt.savefig("epsilon_decay.png")
+    plt.savefig("figs/dqn_figs/epsilon_decay.png")
     plt.close()
 
     # Save the trained model.
-    torch.save(agent.policy_net.state_dict(), "dqn_balloon_model.pth")
+    torch.save(agent.policy_net.state_dict(), "models/dqn_model/dqn_balloon_model.pth")
 
     # Save the wind field image using the environment's built-in function.
     env_vis = Balloon2DEnv()
-    env_vis.save_wind_field("wind_field.png")
+    env_vis.save_wind_field("figs/dqn_figs/wind_field.png")
     env_vis.close()
 
     # Run one test episode to record the balloon's trajectory.
@@ -95,7 +95,7 @@ def train(num_episodes=500, target_update=10):
     # q = ax.quiver(x_forces, y_forces, fx_grid, fy_grid, color='blue', alpha=0.5)
     test_states_arr = np.array(test_states)
     ax.plot(test_states_arr[:, 0], test_states_arr[:, 1], marker='o', color='red', linewidth=2, markersize=4)
-    plt.savefig("balloon_trajectory.png")
+    plt.savefig("figs/dqn_figs/balloon_trajectory.png")
     plt.close()
 
     # ---- Create an animation showing how the trained policy drives the balloon ----
@@ -119,7 +119,7 @@ def train(num_episodes=500, target_update=10):
     anim = animation.FuncAnimation(fig_anim, animate_balloon,
                                    frames=len(test_states), interval=50, blit=True)
     # Save the animation as an MP4 file. Change writer or filename as desired.
-    anim.save("balloon_animation.gif", writer="pillow")
+    anim.save("animations/dqn_2d_animation.gif", writer="pillow")
     print("Animation saved as 'balloon_animation.gif'. Update to .mp4 later.")
     plt.close(fig_anim)
 

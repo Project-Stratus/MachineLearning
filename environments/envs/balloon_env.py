@@ -277,7 +277,7 @@ class Balloon2DEnv(gym.Env):
             self.window = None
             self.clock = None
 
-    def save_wind_field(self, filename="wind_field.png"):
+    def save_wind_field(self, filename="models/dqn_model/wind_field.png"):
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.set_title("Wind Field")
         ax.set_xlabel("X position (m)")
@@ -301,5 +301,5 @@ if __name__ == "__main__":
         obs, reward, done, info = env.step(env.action_space.sample())
         env.render()
         print(f"Obs: {obs}, Reward: {reward}")
-    env.save_wind_field("test_wind_field.png")
+    env.save_wind_field("models/dqn_model/test_wind_field.png")
     env.close()
