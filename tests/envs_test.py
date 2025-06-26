@@ -6,10 +6,10 @@ import math
 import pytest
 import numpy as np
 
-from environments.envs.atmosphere import Atmosphere
-from environments.envs.balloon import Balloon
-from environments.envs.balloon_1d_env import Balloon1DEnv
-from environments.envs.balloon_2d_env import Balloon2DEnv
+from environments.core.atmosphere import Atmosphere
+from environments.core.balloon import Balloon
+from environments.envs.old.balloon_1d_env import Balloon1DEnv
+from environments.envs.old.balloon_2d_env import Balloon2DEnv
 
 
 # ---------------------------------------------------------------------

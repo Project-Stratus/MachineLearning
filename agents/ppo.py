@@ -22,7 +22,7 @@ LEARNING_RATE = [2e-4, 1e-3]
 GAMMA = 0.99
 REWARD_THRESHOLD = 250
 
-DIM = 1
+DIM = 1     # 1, 2, or 3 for 1D, 2D, or 3D environments respectively.
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.

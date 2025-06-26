@@ -9,7 +9,8 @@ The renderer is completely stateless except for the Pygame window/clock,
 so you can reuse one instance across episodes or even different envs.
 """
 from __future__ import annotations
-import math, os
+import math
+import os
 from typing import Tuple, Dict, Any
 import numpy as np
 import pygame
@@ -55,10 +56,10 @@ class PygameRenderer:
             • z0             (float)         – fixed altitude for dim==2
             • wind_sampler   (callable (x,y,z)->np.ndarray)
         """
-        dim          = state["dim"]
-        balloon_pos  = state["balloon_pos"]
-        goal_pos     = state["goal_pos"]
-        z0           = state["z0"]
+        dim = state["dim"]
+        balloon_pos = state["balloon_pos"]
+        goal_pos = state["goal_pos"]
+        z0 = state["z0"]
         wind_sampler = state["wind_sampler"]
 
         canvas = pygame.Surface((self.window_w, self.window_h))
@@ -96,7 +97,7 @@ class PygameRenderer:
 
         # balloon & goal
         bx, by = to_left(*(balloon_pos[:2] if dim >= 2 else (0.0, 0.0)))
-        gx, gy = to_left(*(goal_pos[:2]    if dim >= 2 else (0.0, 0.0)))
+        gx, gy = to_left(*(goal_pos[:2] if dim >= 2 else (0.0, 0.0)))
         pygame.draw.circle(map_surface, (255, 0, 0), (bx, by), 8)
         pygame.draw.circle(map_surface, (0, 200, 0), (gx, gy), 6)
 

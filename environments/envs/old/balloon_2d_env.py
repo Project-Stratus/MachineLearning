@@ -8,7 +8,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import matplotlib.pyplot as plt
 
-from environments.envs.balloon import Balloon
+from environments.core.balloon import Balloon
 from environments.core.constants import DT
 
 # -------------------------------

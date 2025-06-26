@@ -1,26 +1,11 @@
-# import gymnasium as gym
-
-# env = gym.make("LunarLander-v3", render_mode="human")
-# observation, info = env.reset()
-
-# episode_over = False
-# while not episode_over:
-#     action = env.action_space.sample()  # agent policy that uses the observation and info
-#     observation, reward, terminated, truncated, info = env.step(action)
-
-#     episode_over = terminated or truncated
-
-# env.close()
-
-
 """
-quick_test_nd.py
+quick test
 Run each dimensional mode for a few seconds with random actions.
 """
 
 import time
 import pygame
-from environments.envs.balloon_3d_env import Balloon3DEnv        # adjust import path if needed
+from environments.envs.balloon_3d_env import Balloon3DEnv
 
 
 def run(dim, steps=300, human_render=True):
@@ -50,4 +35,4 @@ def run(dim, steps=300, human_render=True):
 
 if __name__ == "__main__":
     for dim in (1, 2, 3):
-        run(dim, steps=500)
+        run(dim, steps=100)

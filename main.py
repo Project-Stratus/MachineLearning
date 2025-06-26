@@ -1,6 +1,4 @@
 import agents.ppo as ppo
-# from agents.train_dqn import train as dqn_train
-# from agents.test_dqn import dqn_test
 import agents.dqn as dqn
 import argparse
 
@@ -13,6 +11,7 @@ if __name__ == "__main__":
     parser.add_argument('model', choices=['ppo', 'dqn'], help='Name of agent to load/train.')
     args = parser.parse_args()
 
+    # Call
     if args.model == 'ppo':
         if args.train:
             ppo.train(verbose=True)
