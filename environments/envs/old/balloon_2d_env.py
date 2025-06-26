@@ -9,7 +9,7 @@ from gymnasium import spaces
 import matplotlib.pyplot as plt
 
 from environments.envs.balloon import Balloon
-from environments.constants import DT
+from environments.core.constants import DT
 
 # -------------------------------
 # GLOBAL CONSTANTS

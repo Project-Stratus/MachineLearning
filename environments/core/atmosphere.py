@@ -1,6 +1,6 @@
 import numpy as np
 
-from environments.constants import SCALE_HEIGHT, P0, R, T_AIR, M_AIR
+from environments.core.constants import SCALE_HEIGHT, P0, R, T_AIR, M_AIR
 
 
 class Atmosphere:

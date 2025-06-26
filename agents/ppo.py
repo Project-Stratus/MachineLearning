@@ -7,12 +7,13 @@ import pygame
 from stable_baselines3.common.monitor import Monitor
 
 
-ENVIRONMENT_NAME = "environments/Balloon1D-v0"
+ENVIRONMENT_NAME = "environments/Balloon3D-v0"
 SAVE_PATH = "./models/ppo_model/"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
-EPISODES = 1_000_000
+# EPISODES = 1_000_000
+EPISODES = 1_000
 BATCH_SIZE = 256
 EPOCHS = 10
 HIDDEN_SIZES = [[256, 256, 256], [256, 256, 256]]
@@ -21,17 +22,19 @@ LEARNING_RATE = [2e-4, 1e-3]
 GAMMA = 0.99
 REWARD_THRESHOLD = 250
 
+DIM = 1
+
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
 def train(verbose=False, render_freq=None) -> None:
 
-    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, disable_env_checker=True))
+    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
 
     # Use a GPU if possible
     device = torch.device("cuda") if USE_GPU and torch.cuda.is_available() else torch.device("cpu")
 
     model = PPO(
-        "MultiInputPolicy",
+        "MlpPolicy",
         env,
         batch_size=BATCH_SIZE,
         n_epochs=EPOCHS,
@@ -40,7 +43,7 @@ def train(verbose=False, render_freq=None) -> None:
     )
 
     # Create an evaluation callback
-    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, disable_env_checker=True))
+    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
     stop_callback = StopTrainingOnRewardThreshold(
         reward_threshold=320,  # Set your desired reward threshold here
         verbose=1
@@ -66,7 +69,7 @@ def train(verbose=False, render_freq=None) -> None:
 
 # Load the final model from the previous training run, and dipslay it playing the environment
 def test() -> None:
-    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", disable_env_checker=True))
+    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=DIM, disable_env_checker=True))
 
     # Use a GPU if possible
     device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
@@ -82,6 +85,7 @@ def test() -> None:
             # env.render()          # I'm pretty sure this is redundant with render_mode="human"? - AS
             action, _states = model.predict(state, deterministic=True)
             next_state, reward, terminated, truncated, info = env.step(action)
+            # next_state, reward, terminated, truncated, info = env.step(env.action_space.sample())
             state = next_state
             game_over = terminated or truncated
 

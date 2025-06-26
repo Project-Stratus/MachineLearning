@@ -1,7 +1,7 @@
 import numpy as np
 
-from environments.envs.atmosphere import Atmosphere
-from environments.constants import G, CD, AREA
+from environments.core.atmosphere import Atmosphere
+from environments.core.constants import G, CD, AREA
 
 
 class Balloon:

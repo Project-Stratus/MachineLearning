@@ -1,5 +1,5 @@
 from gymnasium.envs.registration import register
-from environments.constants import *
+from environments.core.constants import *       # noqa
 
 register(
     id="environments/Balloon1D-v0",
