@@ -2,7 +2,7 @@ import gymnasium as gym
 import os
 import torch
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
 import pygame
 from stable_baselines3.common.monitor import Monitor
 
@@ -12,8 +12,8 @@ SAVE_PATH = "./models/ppo_model/"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
-# EPISODES = 1_000_000
-EPISODES = 1_000
+EPISODES = 1_000_000
+# EPISODES = 1_000
 BATCH_SIZE = 256
 EPOCHS = 10
 HIDDEN_SIZES = [[256, 256, 256], [256, 256, 256]]
@@ -26,7 +26,7 @@ DIM = 1     # 1, 2, or 3 for 1D, 2D, or 3D environments respectively.
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
-def train(verbose=False, render_freq=None) -> None:
+def train(verbose=0, render_freq=None) -> None:
 
     env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
 
@@ -38,7 +38,7 @@ def train(verbose=False, render_freq=None) -> None:
         env,
         batch_size=BATCH_SIZE,
         n_epochs=EPOCHS,
-        verbose=1,
+        verbose=verbose,
         device=device
     )
 
@@ -48,15 +48,19 @@ def train(verbose=False, render_freq=None) -> None:
         reward_threshold=320,  # Set your desired reward threshold here
         verbose=1
     )
-    callback = EvalCallback(
+    eval_callback = EvalCallback(
         eval_env,
         callback_on_new_best=stop_callback,
         best_model_save_path=SAVE_PATH,
         log_path=SAVE_PATH,
-        eval_freq=10000,
+        eval_freq=100_000,
         deterministic=True,
         render=False
     )
+
+    tqdm_callback = ProgressBarCallback()
+
+    callback = CallbackList([tqdm_callback, eval_callback])
 
     # Train the model
     model.learn(total_timesteps=EPISODES*BATCH_SIZE, callback=callback)
@@ -82,7 +86,6 @@ def test() -> None:
         state, info = env.reset()
         game_over: bool = False
         while not game_over:
-            # env.render()          # I'm pretty sure this is redundant with render_mode="human"? - AS
             action, _states = model.predict(state, deterministic=True)
             next_state, reward, terminated, truncated, info = env.step(action)
             # next_state, reward, terminated, truncated, info = env.step(env.action_space.sample())

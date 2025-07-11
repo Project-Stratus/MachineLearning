@@ -13,6 +13,9 @@ Dimensions
 + 3D: Full 3D space (x, y, z).
 
 Choose mode with constructor argument `dim=1|2|3`.
+For most of the code, dim=1 is treated with only z coordinate but
+dim=2|3 both are computed in 3 dimensions with a static z coordinate
+for 2D.
 
 =========
 Action space
@@ -99,9 +102,12 @@ class Balloon3DEnv(gym.Env):
         z_range=(0.0, ALT_MAX),
         wind_mag=10.0,           # max wind speed [m/s]
         wind_cells=40,           # grid for wind visualisation
-        inflate_rate=0.02,       # Δvolume per *inflate* action
+        inflate_rate=0.01,       # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork"
+        alpha=0.05,                   # velocity cost weight
+        beta=0.01,                   # action-flip cost weight
+
     )
 
     def __init__(self,
@@ -114,6 +120,9 @@ class Balloon3DEnv(gym.Env):
         self.cfg = cfg
         self.dim: int = cfg["dim"]
         self.wind_cfg_path = "environments/winds.json"
+
+        self.alpha = cfg["alpha"]  # velocity cost weight
+        self.beta = cfg["beta"]    # action-flip cost weight
 
         assert self.dim in (1, 2, 3), "dim must be 1, 2 or 3"
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -196,10 +205,16 @@ class Balloon3DEnv(gym.Env):
 
     # pack observation in the same order as bounds above
     def _get_obs(self) -> np.ndarray:
-        # dim = self.dim
         pos = self._balloon.pos  # native metres array (len == dim)
         vel = self._balloon.vel
-        alt = pos[-1] if self.dim == 3 else self.z0
+        # alt = pos[-1] if self.dim == 3 else self.z0
+        if self.dim == 1:
+            alt = self._balloon.pos[0]          # real altitude
+        elif self.dim == 3:
+            alt = self._balloon.pos[2]
+        else:                                   # dim == 2
+            alt = self.z0
+
         pos_norm = self._normalise_position(pos)
         vel_norm = np.clip(vel / VEL_MAX, -1.0, 1.0)
         vol_norm = np.array([self._balloon.volume / VOL_MAX])
@@ -238,7 +253,7 @@ class Balloon3DEnv(gym.Env):
             return 0.0, 0.0, float(pos[0])
         elif self.dim == 2:
             x, y = pos[:2]
-            return float(x), 0.0, float(y)
+            return float(x), float(y), self.z0
         else:
             x, y, z = pos
             return float(x), float(y), float(z)
@@ -302,6 +317,8 @@ class Balloon3DEnv(gym.Env):
         observation = self._get_obs()
         info = self._get_info()
 
+        self.prev_action = Actions.nothing.value  # no action on reset
+
         if self.render_mode == "human":
             self._ensure_renderer()
             self.renderer.draw(dict(
@@ -345,7 +362,11 @@ class Balloon3DEnv(gym.Env):
         # --- reward & termination -----------------------------------------
         self._time += 1
         alt = self._balloon.pos[-1]
-        terminated = (self.dim == 3 and alt <= 0.0)  # crash to ground
+        # terminated = (self.dim == 3 and alt <= 0.0)  # crash to ground
+        if (self.dim in (1, 3)) and self._balloon.pos[-1] <= 0.0:
+            terminated = True
+        else:
+            terminated = False
         self.truncated = self._time >= self.cfg["time_max"]
 
         reward = distance_reward(
@@ -356,6 +377,24 @@ class Balloon3DEnv(gym.Env):
             punishment=self.cfg["punishment"]
         )
 
+        # Give agent 'success target'
+        EPS = 5.0          # metres; tune
+        VEL_EPS = 0.2      # m/s; tune
+
+        on_target = abs(self._balloon.pos[0] - self.goal[0]) < EPS \
+            and abs(self._balloon.vel[0]) < VEL_EPS
+        if on_target:
+            reward += 10.0          # success bonus
+            terminated = True       # optional but recommended
+
+        # Penalise velocity and action flips
+        velocity_cost = self.alpha * abs(self._balloon.vel[0])   # Velocity cost weight
+        flip_cost = self.beta * (action != self.prev_action)  # Penalise action flips
+
+        reward -= (velocity_cost + flip_cost)
+        self.prev_action = action
+
+        # --- collect observation & info -----------------------------------
         obs = self._get_obs()
         if terminated or self.truncated:
             self.final_obs = obs
