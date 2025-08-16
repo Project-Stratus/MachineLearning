@@ -3,8 +3,24 @@ import os
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
-import pygame
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
 from stable_baselines3.common.monitor import Monitor
+import pygame
+import multiprocessing as mp
+from typing import Callable
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+torch.set_num_threads(1)
+
+"""
+Time param cheat sheet:
+- BATCH_SIZE:   Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
+                Larger = smoother grad estimate, heavier CPU load. Smaller = noiser grads, more optimiser steps per update.
+- EPOCHS:       Passes over each rollout. How many times PPO re-shuffles the same chunk of data.
+                Larger = Better utilisation of each rollout, slower wall-clock per update, risk of overfitting. Smaller = Faster updates, each sample influences policy fewer times.
+- EPISODES:     Not SB3 param. Affects total_timesteps.
+"""
 
 
 ENVIRONMENT_NAME = "environments/Balloon3D-v0"
@@ -12,9 +28,10 @@ SAVE_PATH = "./models/ppo_model/"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
-EPISODES = 1_000_000
-# EPISODES = 1_000
-BATCH_SIZE = 256
+# EPISODES = 1_000_000
+EPISODES = 200_000
+BATCH_SIZE = 256                  # Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
+# BATCH_SIZE = 128
 EPOCHS = 10
 HIDDEN_SIZES = [[256, 256, 256], [256, 256, 256]]
 EPSILON = 0.2
@@ -23,6 +40,7 @@ GAMMA = 0.99
 REWARD_THRESHOLD = 250
 
 DIM = 1     # 1, 2, or 3 for 1D, 2D, or 3D environments respectively.
+
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
@@ -87,8 +105,9 @@ def test() -> None:
         game_over: bool = False
         while not game_over:
             action, _states = model.predict(state, deterministic=True)
+            action = env.action_space.sample()      # Uncomment to override with random actions
             next_state, reward, terminated, truncated, info = env.step(action)
-            # next_state, reward, terminated, truncated, info = env.step(env.action_space.sample())
+            print(f"Action: {action}, Reward: {reward}")
             state = next_state
             game_over = terminated or truncated
 

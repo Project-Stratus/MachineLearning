@@ -22,9 +22,9 @@ Action space
 =========
 Discrete action space with three actions:
 
-+ 0: Inflate balloon (increase volume).
-+ 1: Deflate balloon (decrease volume).
-+ 2: Do nothing (no volume change).
++ 1: Inflate balloon (increase volume).
+  0: Do nothing (no volume change).
+- 1: Deflate balloon (decrease volume).
 
 =========
 Observation space
@@ -61,7 +61,6 @@ Configuration
 =========
 Tunable constants are in DEFAULTS dict, pass `config` argument
 to override any of them without sub-classing.
-
 """
 from __future__ import annotations
 
@@ -82,9 +81,9 @@ from environments.core.constants import VOL_MAX, ALT_MAX, VEL_MAX, P_MAX, DT
 
 
 class Actions(Enum):
-    inflate = 0
-    deflate = 1
-    nothing = 2
+    inflate = 1
+    deflate = -1
+    # nothing = 0
 
 
 class Balloon3DEnv(gym.Env):
@@ -317,7 +316,10 @@ class Balloon3DEnv(gym.Env):
         observation = self._get_obs()
         info = self._get_info()
 
-        self.prev_action = Actions.nothing.value  # no action on reset
+        try:
+            self.prev_action = Actions.nothing.value  # no action on reset
+        except AttributeError:
+            self.prev_action = Actions.deflate.value  # first action is deflate
 
         if self.render_mode == "human":
             self._ensure_renderer()
@@ -361,7 +363,7 @@ class Balloon3DEnv(gym.Env):
 
         # --- reward & termination -----------------------------------------
         self._time += 1
-        alt = self._balloon.pos[-1]
+        # alt = self._balloon.pos[-1]
         # terminated = (self.dim == 3 and alt <= 0.0)  # crash to ground
         if (self.dim in (1, 3)) and self._balloon.pos[-1] <= 0.0:
             terminated = True
