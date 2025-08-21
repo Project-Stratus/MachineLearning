@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Tuple
 import numpy as np
 
+try:
+    from environments.core.jit_kernels import wind_sample_idx_numba
+    _JIT_OK = True
+except Exception:
+    _JIT_OK = False
+
 
 class WindField:
     def __init__(
@@ -54,21 +60,68 @@ class WindField:
 
         self._build_grid()  # fills self._fx_grid, self._fy_grid
 
+        self.dx = (x_range[1] - x_range[0]) / self.cells
+        self.dy = (y_range[1] - y_range[0]) / self.cells
+        self.dz = (z_range[1] - z_range[0]) / self.cells
+        self.inv_dx = 1.0 / self.dx
+        self.inv_dy = 1.0 / self.dy
+        self.inv_dz = 1.0 / self.dz
+
+    def _to_idx(self, xi, x0, inv_dx, cells):
+        ix = int((xi - x0) * inv_dx)
+        if ix < 0:
+            ix = 0
+        elif ix >= cells:
+            ix = cells - 1
+        return ix
+
     # ------------------------------------------------------------------ #
     # public API
     # ------------------------------------------------------------------ #
+    # def sample(self, x: float, y: float, z: float) -> np.ndarray:
+    #     """Return (fx, fy, fz) at continuous point (x,y,z)."""
+    #     xi = np.clip(x, *self.x_range)
+    #     yi = np.clip(y, *self.y_range)
+    #     zi = np.clip(z, *self.z_range)
+
+    #     ix = np.clip(np.searchsorted(self.x_edges, xi) - 1, 0, self.cells - 1)
+    #     iy = np.clip(np.searchsorted(self.y_edges, yi) - 1, 0, self.cells - 1)
+    #     iz = np.clip(np.searchsorted(self.z_edges, zi) - 1, 0, self.cells - 1)
+
+    #     fx = self._fx_grid[ix, iy, iz]
+    #     fy = self._fy_grid[ix, iy, iz]
+    #     return np.array([fx, fy, 0.0], dtype=np.float32)
+
     def sample(self, x: float, y: float, z: float) -> np.ndarray:
-        """Return (fx, fy, fz) at continuous point (x,y,z)."""
-        xi = np.clip(x, *self.x_range)
-        yi = np.clip(y, *self.y_range)
-        zi = np.clip(z, *self.z_range)
+        xi = x if x >= self.x_range[0] else self.x_range[0]
+        xi = xi if xi <= self.x_range[1] else self.x_range[1]
+        yi = y if y >= self.y_range[0] else self.y_range[0]
+        yi = yi if yi <= self.y_range[1] else self.y_range[1]
+        zi = z if z >= self.z_range[0] else self.z_range[0]
+        zi = zi if zi <= self.z_range[1] else self.z_range[1]
 
-        ix = np.clip(np.searchsorted(self.x_edges, xi) - 1, 0, self.cells - 1)
-        iy = np.clip(np.searchsorted(self.y_edges, yi) - 1, 0, self.cells - 1)
-        iz = np.clip(np.searchsorted(self.z_edges, zi) - 1, 0, self.cells - 1)
+        if _JIT_OK:
+            fx, fy = wind_sample_idx_numba(xi, yi, zi,
+                                             self.x_range[0], self.inv_dx,
+                                             self.y_range[0], self.inv_dy,
+                                             self.z_range[0], self.inv_dz,
+                                             self.cells,
+                                             self._fx_grid, self._fy_grid)
+        else:
+            # Fallback: previous searchsorted approach
+            ix = np.clip(np.searchsorted(self.x_edges, xi) - 1, 0, self.cells - 1)
+            iy = np.clip(np.searchsorted(self.y_edges, yi) - 1, 0, self.cells - 1)
+            iz = np.clip(np.searchsorted(self.z_edges, zi) - 1, 0, self.cells - 1)
+            fx = self._fx_grid[ix, iy, iz]
+            fy = self._fy_grid[ix, iy, iz]
 
-        fx = self._fx_grid[ix, iy, iz]
-        fy = self._fy_grid[ix, iy, iz]
+        # ix = self._to_idx(xi, self.x_range[0], self.inv_dx, self.cells)
+        # iy = self._to_idx(yi, self.y_range[0], self.inv_dy, self.cells)
+        # iz = self._to_idx(zi, self.z_range[0], self.inv_dz, self.cells)
+
+        # # avoid new array allocation on hot path
+        # fx = float(self._fx_grid[ix, iy, iz])
+        # fy = float(self._fy_grid[ix, iy, iz])
         return np.array([fx, fy, 0.0], dtype=np.float32)
 
     # ------------------------------------------------------------------ #

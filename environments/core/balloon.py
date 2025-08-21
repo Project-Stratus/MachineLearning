@@ -1,7 +1,13 @@
 import numpy as np
 
 from environments.core.atmosphere import Atmosphere
-from environments.core.constants import G, CD, AREA
+from environments.core.constants import G, CD, AREA, R
+
+try:
+    from environments.core.jit_kernels import physics_step_numba, density_numba
+    _JIT_OK = True
+except Exception:
+    _JIT_OK = False
 
 
 class Balloon:
@@ -143,52 +149,133 @@ class Balloon:
     # -------------------------------------------------------------------------
     # UNIVERSAL update – works for *both* env calling conventions
     # -------------------------------------------------------------------------
+    # def update(self, *args, external_force=None, control_force=None):
+    #     """
+    #     Two call signatures accepted:
+
+    #         • update(dt)                            ← 1-D env
+    #         • update(t, dt, external_force=…,       ← 2-D env
+    #                  control_force=…)
+
+    #     The extra keyword arguments are optional in either case.
+    #     """
+    #     # Decode which variant we have been given ------------------------------
+    #     if len(args) == 1:
+    #         # Old 1-D env style: only Δt
+    #         dt = float(args[0])
+    #         t = self.t + dt  # advance internal clock
+    #     elif len(args) >= 2:
+    #         # New 2-D env style: explicit (t, dt)
+    #         t, dt = map(float, args[:2])
+    #         self.t = t  # sync internal clock
+    #     else:
+    #         raise TypeError("update() expects (dt) or (t, dt)")
+
+    #     # Default forces --------------------------------------------------------
+    #     if external_force is None:
+    #         external_force = np.zeros(self.dim)
+    #     if control_force is None:
+    #         control_force = np.zeros(self.dim)
+
+    #     # Net force -------------------------------------------------------------
+    #     f_net = (
+    #         self.buoyant_force(t)
+    #         + self.weight()
+    #         + self.drag_force()
+    #         + np.asarray(external_force)
+    #         + np.asarray(control_force)
+    #     )
+    #     acc = f_net / self.mass
+
+    #     # Integrate -------------------------------------------------------------
+    #     self.vel += acc * dt
+    #     self.vel = np.clip(self.vel, -200.0, 200.0)
+    #     self.pos += self.vel * dt
+
+    #     # Keep above ground -----------------------------------------------------
+    #     if self.pos[-1] < 0.0:
+    #         self.pos[-1] = 0.0
+    #         self.vel[-1] = 0.0
+
+    #     self.t = t  # ensure time is consistent
+
     def update(self, *args, external_force=None, control_force=None):
-        """
-        Two call signatures accepted:
-
-            • update(dt)                            ← 1-D env
-            • update(t, dt, external_force=…,       ← 2-D env
-                     control_force=…)
-
-        The extra keyword arguments are optional in either case.
-        """
-        # Decode which variant we have been given ------------------------------
         if len(args) == 1:
-            # Old 1-D env style: only Δt
             dt = float(args[0])
-            t = self.t + dt  # advance internal clock
+            t = self.t + dt
         elif len(args) >= 2:
-            # New 2-D env style: explicit (t, dt)
             t, dt = map(float, args[:2])
-            self.t = t  # sync internal clock
+            self.t = t
         else:
             raise TypeError("update() expects (dt) or (t, dt)")
 
-        # Default forces --------------------------------------------------------
+        # defaults as Python tuples to avoid np.zeros
         if external_force is None:
-            external_force = np.zeros(self.dim)
+            external_force = np.zeros(self.dim, dtype=np.float64)
+        else:
+            external_force = np.asarray(external_force, dtype=np.float64)
         if control_force is None:
-            control_force = np.zeros(self.dim)
+            control_force = np.zeros(self.dim, dtype=np.float64)
+        else:
+            control_force = np.asarray(control_force, dtype=np.float64)
 
-        # Net force -------------------------------------------------------------
-        f_net = (
-            self.buoyant_force(t)
-            + self.weight()
-            + self.drag_force()
-            + np.asarray(external_force)
-            + np.asarray(control_force)
-        )
-        acc = f_net / self.mass
+        # common values
+        z = self.pos[-1]
+        # rho_air = self.atmosphere.density(z)
+        # vol = self.dynamic_volume(t)
 
-        # Integrate -------------------------------------------------------------
-        self.vel += acc * dt
-        self.vel = np.clip(self.vel, -200.0, 200.0)
-        self.pos += self.vel * dt
+        if _JIT_OK:
+            rho_air = float(density_numba(self.atmosphere.p0, self.atmosphere.scale_height, self.atmosphere.temperature, self.atmosphere.molar_mass, R, z))
+        else:
+            rho_air = self.atmosphere.density(z)
+        vol = self.dynamic_volume(t)
 
-        # Keep above ground -----------------------------------------------------
-        if self.pos[-1] < 0.0:
-            self.pos[-1] = 0.0
-            self.vel[-1] = 0.0
+        if self.pos.dtype != np.float64: self.pos = self.pos.astype(np.float64, copy=False)
+        if self.vel.dtype != np.float64: self.vel = self.vel.astype(np.float64, copy=False)
 
-        self.t = t  # ensure time is consistent
+        if _JIT_OK:
+            physics_step_numba(self.pos, self.vel, dt, self.mass, G, CD, AREA, rho_air, vol, external_force, control_force, int(self.dim))
+        else:
+            # Fallback: your original pure-Python path
+            f_net = self.buoyant_force(t) + self.weight() + self.drag_force() + external_force + control_force
+            acc = f_net / self.mass
+            self.vel += acc * dt
+            self.vel = np.clip(self.vel, -200.0, 200.0)
+            self.pos += self.vel * dt
+            if self.pos[-1] < 0.0:
+                self.pos[-1] = 0.0
+                self.vel[-1] = 0.0
+
+        # # buoyancy + weight only in z
+        # fz = rho_air * G * vol - self.mass * G
+
+        # # drag vector
+        # vx, vy, vz = (self.vel.tolist() + [0.0, 0.0, 0.0])[:3]
+        # speed = float(np.hypot(vx, vy) if self.dim >= 2 else abs(vz))
+        # speed = np.sqrt(vx*vx + vy*vy + vz*vz)
+        # if speed > 1e-8:
+        #     f_mag = 0.5 * CD * AREA * rho_air * (speed*speed)
+        #     drag = (-f_mag * vx / speed, -f_mag * vy / speed, -f_mag * vz / speed)
+        # else:
+        #     drag = (0.0, 0.0, 0.0)
+
+        # # assemble net acceleration
+        # ax = (external_force[0] + control_force[0] + (drag[0] if self.dim >= 1 else 0.0)) / self.mass
+        # ay = (external_force[1] + control_force[1] + (drag[1] if self.dim >= 2 else 0.0)) / self.mass if self.dim >= 2 else 0.0
+        # az = (external_force[2] + control_force[2] + drag[2] + fz) / self.mass if self.dim >= 3 else (fz + external_force[-1] + control_force[-1]) / self.mass
+
+        # # integrate in-place
+        # if self.dim >= 1: self.vel[0] += ax * dt    # noqa
+        # if self.dim >= 2: self.vel[1] += ay * dt    # noqa
+        # if self.dim >= 3: self.vel[2] += az * dt    # noqa
+        # np.clip(self.vel, -200.0, 200.0, out=self.vel)
+
+        # if self.dim >= 1: self.pos[0] += self.vel[0] * dt   # noqa
+        # if self.dim >= 2: self.pos[1] += self.vel[1] * dt   # noqa
+        # if self.dim >= 3: self.pos[2] += self.vel[2] * dt   # noqa
+
+        # if self.pos[-1] < 0.0:
+        #     self.pos[-1] = 0.0
+        #     self.vel[-1] = 0.0
+
+        self.t = t
