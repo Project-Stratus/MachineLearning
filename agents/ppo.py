@@ -45,21 +45,20 @@ POLICY_KWARGS = dict(
 TOTAL_TIMESTEPS = 5_000_000  # Total training steps
 EVAL_FREQ = 500_000  # Evaluate every n steps
 REWARD_THRESHOLD = -0.05  # Stop training when the model reaches this reward
-DIM = 1     # 1, 2, or 3 for 1D, 2D, or 3D environments respectively.
 
 MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
 N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() //2))
 
-def make_env_fn(rank: int) -> Callable[[], gym.Env]:
+def make_env_fn(dim: int) -> Callable[[], gym.Env]:
     def _thunk():
         # IMPORTANT: avoid passing large unpicklable objects via closure.
-        env = gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True)
+        env = gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True)
         return env
     return _thunk
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
-def train(verbose=0, render_freq=None) -> None:
+def train(dim, verbose=0, render_freq=None) -> None:
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
@@ -96,7 +95,7 @@ def train(verbose=0, render_freq=None) -> None:
     )
 
     # Create an evaluation callback (no vectorisation needed)
-    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
+    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True))
 
     stop_callback = StopTrainingOnRewardThreshold(
         reward_threshold=REWARD_THRESHOLD,
@@ -153,10 +152,10 @@ def train(verbose=0, render_freq=None) -> None:
 
 
 # Load the final model from the previous training run, and dipslay it playing the environment
-def test() -> None:
+def test(dim) -> None:
     from environments.envs.balloon_3d_env import Actions
 
-    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=DIM, disable_env_checker=True, config={"time_max": 2_000}))
+    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 2_000}))
 
     # Use a GPU if possible
     device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")

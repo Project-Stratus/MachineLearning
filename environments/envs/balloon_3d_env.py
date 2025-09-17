@@ -478,7 +478,6 @@ class Balloon3DEnv(gym.Env):
         if self.render_mode == "human":
             self._ensure_renderer()
             self.renderer.draw(dict(
-                dim=self.dim,
                 balloon_pos=self._balloon.pos,
                 goal_pos=self.goal.copy(),
                 z0=self.z0,
@@ -501,5 +500,6 @@ class Balloon3DEnv(gym.Env):
                 z_range=self.z_range,
                 x_centers=self.x_centers,
                 y_centers=self.y_centers,
-                wind_cells=self.wind_cells
+                wind_cells=self.wind_cells,
+                dim=self.dim,
             )

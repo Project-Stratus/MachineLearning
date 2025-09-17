@@ -64,7 +64,7 @@ def balloon_reward(
     terminated: bool,
     punishment: float,
     prev_distance: float,
-    success_radius: float = 10.0,
+    success_radius: float = 150.0,      # radius (m)
     success_speed: float = 0.2,
     direction_scale: float = 0.05,
 ) -> tuple[float, dict[str, float], float]:

@@ -26,11 +26,13 @@ class PygameRenderer:
         x_centers: np.ndarray,
         y_centers: np.ndarray,
         wind_cells: int,
+        dim: int
     ):
         self.window_w, self.window_h = window_size
         self.x_range, self.y_range, self.z_range = x_range, y_range, z_range
         self.x_centers, self.y_centers = x_centers, y_centers
         self.wind_cells = wind_cells
+        self.dim = dim
 
         self.left_w = int(self.window_w * 0.75)
         self.right_w = self.window_w - self.left_w
@@ -40,6 +42,7 @@ class PygameRenderer:
 
         pygame.init()
         pygame.display.init()
+        pygame.display.set_caption(f"Project Stratus - {self.dim}D Balloon Environment")
         self.window = pygame.display.set_mode(window_size, display=0)
         self.clock = pygame.time.Clock()
         self.fps = 60
@@ -53,10 +56,9 @@ class PygameRenderer:
             • dim            (int)
             • balloon_pos    (np.ndarray)
             • goal_pos       (np.ndarray)
-            • z0             (float)         – fixed altitude for dim==2
+            • z0             (float)         - fixed altitude for dim==2
             • wind_sampler   (callable (x,y,z)->np.ndarray)
         """
-        dim = state["dim"]
         balloon_pos = state["balloon_pos"]
         goal_pos = state["goal_pos"]
         z0 = state["z0"]
@@ -68,7 +70,7 @@ class PygameRenderer:
         # ------------- coordinate helper ---------------------------------
         def to_left(px: float, py: float):
             sx = (px - self.x_range[0]) / (self.x_range[1] - self.x_range[0])
-            sy_range = self.y_range if dim == 3 else self.y_range
+            sy_range = self.y_range if self.dim == 3 else self.y_range
             sy = (py - sy_range[0]) / (sy_range[1] - sy_range[0])
             return int(sx * self.left_w), int((1.0 - sy) * self.window_h)
 
@@ -81,7 +83,7 @@ class PygameRenderer:
             for iy in range(0, self.wind_cells, STEP):
                 x = self.x_centers[ix]
                 y = self.y_centers[iy]
-                z = balloon_pos[-1] if dim == 3 else z0
+                z = balloon_pos[-1] if self.dim == 3 else z0
                 wx, wy, _ = wind_sampler(x, y, z)
                 if wx == wy == 0.0:
                     continue
@@ -96,8 +98,8 @@ class PygameRenderer:
                     pygame.draw.line(map_surface, COL, (x1, y1), (x1 - dx, y1 - dy), 1)
 
         # balloon & goal
-        bx, by = to_left(*(balloon_pos[:2] if dim >= 2 else (0.0, 0.0)))
-        gx, gy = to_left(*(goal_pos[:2] if dim >= 2 else (0.0, 0.0)))
+        bx, by = to_left(*(balloon_pos[:2] if self.dim >= 2 else (0.0, 0.0)))
+        gx, gy = to_left(*(goal_pos[:2] if self.dim >= 2 else (0.0, 0.0)))
         pygame.draw.circle(map_surface, (255, 0, 0), (bx, by), 8)
         pygame.draw.circle(map_surface, (0, 200, 0), (gx, gy), 6)
 
