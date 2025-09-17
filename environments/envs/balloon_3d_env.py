@@ -75,15 +75,17 @@ import pygame
 from environments.core.balloon import Balloon
 from environments.core.atmosphere import Atmosphere
 from environments.core.wind_field import WindField
-from environments.envs.reward import distance_reward
+from environments.envs.reward import balloon_reward, l2_distance
 from environments.render.pygame_render import PygameRenderer
 from environments.core.constants import VOL_MAX, ALT_MAX, VEL_MAX, P_MAX, DT
+
+_JIT_WARMED = False  # whether numba JIT has been warmed up
 
 
 class Actions(Enum):
     inflate = 1
-    deflate = -1
     nothing = 0
+    deflate = -1
 
 
 class Balloon3DEnv(gym.Env):
@@ -94,13 +96,13 @@ class Balloon3DEnv(gym.Env):
     # sensible defaults – override by *config*
     DEFAULTS: Dict[str, Any] = dict(
         dim=3,                    # 1, 2 or 3 dimensions
-        time_max=10_000,           # steps per episode
+        time_max=5_000,           # steps per episode
         punishment=-5.0,        # reward on crash
         x_range=(-2_000.0, 2_000.0),
         y_range=(-2_000.0, 2_000.0),
         z_range=(0.0, ALT_MAX),
         wind_mag=10.0,           # max wind speed [m/s]
-        wind_cells=40,           # grid for wind visualisation
+        wind_cells=20,           # grid for wind visualisation
         inflate_rate=0.01,       # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork"
@@ -167,8 +169,8 @@ class Balloon3DEnv(gym.Env):
         self._obs_size = self.observation_space.shape[0]
         self._obs_buf = np.empty(self._obs_size, dtype=np.float32)
         self.goal_norm = None
-        self.action_space = spaces.Discrete(3)      # inflate, deflate and nothing
-        self._action_lut = np.array([-1, 0, 1])
+        self.action_space = spaces.Discrete(3)      # inflate, deflate and nothing. Creates idx values 0,1,2
+        self._action_lut = np.array([-1, 0, 1])     # map action index to effect on volume (0->-1, 1->0, 2->+1)
 
         # ------------------------------------------------------------------
         # Runtime state containers
@@ -201,6 +203,7 @@ class Balloon3DEnv(gym.Env):
         low.extend([0.0] * dim)                      # goal
         low.append(0.0)                              # volume
         low.extend([0.0] * dim)                      # position (normalised 0‑1)
+        low.extend([-1.0] * dim)                     # goal - position (normalised)
         low.extend([-1.0] * dim)                     # velocity
         low.append(0.0)                              # pressure
         low.extend([-1.0] * dim)                     # wind
@@ -208,6 +211,7 @@ class Balloon3DEnv(gym.Env):
         high.extend([1.0] * dim)                     # goal
         high.append(1.0)                             # volume
         high.extend([1.0] * dim)                     # position
+        high.extend([1.0] * dim)                     # goal - position (normalised)
         high.extend([1.0] * dim)                     # velocity
         high.append(1.0)                             # pressure
         high.extend([1.0] * dim)                     # wind
@@ -218,15 +222,9 @@ class Balloon3DEnv(gym.Env):
     def _get_obs(self) -> np.ndarray:
         pos = self._balloon.pos  # native metres array (len == dim)
         vel = self._balloon.vel
-        # alt = pos[-1] if self.dim == 3 else self.z0
-        # if self.dim == 1:
-        #     alt = self._balloon.pos[0]          # real altitude
-        # elif self.dim == 3:
-        #     alt = self._balloon.pos[2]
-        # else:                                   # dim == 2
-        #     alt = self.z0
 
         pos_norm = self._normalise_position(pos).astype(np.float32)
+        delta_norm = (self.goal_norm - pos_norm).astype(np.float32)
         vel_norm = np.clip(vel / VEL_MAX, -1.0, 1.0).astype(np.float32)
         vol_norm = np.array([self._balloon.volume / VOL_MAX]).astype(np.float32)
         pressure_norm = np.array([self.last_pressure_norm], dtype=np.float32)
@@ -240,14 +238,14 @@ class Balloon3DEnv(gym.Env):
         i += 1
         self._obs_buf[i:i+d] = pos_norm
         i += d
+        self._obs_buf[i:i+d] = delta_norm
+        i += d
         self._obs_buf[i:i+d] = vel_norm[:d]
         i += d
         self._obs_buf[i] = pressure_norm[0]
         i += 1
         self._obs_buf[i:i+d] = wind
         return self._obs_buf.copy()
-
-        # return np.concatenate([goal_norm, vol_norm, pos_norm, vel_norm, pressure_norm, wind])
 
     # ------------------------------------------------------------------
     # Normalisation helpers
@@ -256,23 +254,13 @@ class Balloon3DEnv(gym.Env):
         # expect shape (dim,)
         if self.dim == 1:
             z = pos[0]
-            # return np.array([(z - self.z_range[0]) / (self.z_range[1] - self.z_range[0])])
             return np.array([(z - self.z_range[0]) * self.inv_zspan], dtype=np.float32)
         elif self.dim == 2:
             x, y = pos[:2]
-            # return np.array([
-            #     (x - self.x_range[0]) / (self.x_range[1] - self.x_range[0]),
-            #     (y - self.y_range[0]) / (self.y_range[1] - self.y_range[0])
-            # ])
             return np.array([(x - self.x_range[0]) * self.inv_xspan,
                              (y - self.y_range[0]) * self.inv_yspan], dtype=np.float32)
         else:  # 3‑D
             x, y, z = pos
-            # return np.array([
-            #     (x - self.x_range[0]) / (self.x_range[1] - self.x_range[0]),
-            #     (y - self.y_range[0]) / (self.y_range[1] - self.y_range[0]),
-            #     (z - self.z_range[0]) / (self.z_range[1] - self.z_range[0])
-            # ])
             return np.array([(x - self.x_range[0]) * self.inv_xspan,
                              (y - self.y_range[0]) * self.inv_yspan,
                              (z - self.z_range[0]) * self.inv_zspan], dtype=np.float32)
@@ -349,6 +337,7 @@ class Balloon3DEnv(gym.Env):
 
         observation = self._get_obs()
         info = self._get_info()
+        self._prev_distance = l2_distance(self._balloon.pos, self.goal, self.dim)
 
         try:
             self.prev_action = Actions.nothing.value  # no action on reset
@@ -366,26 +355,29 @@ class Balloon3DEnv(gym.Env):
             ))
 
         # Warm up JIT to compile before training
-        try:
-            from environments.core.jit_kernels import pressure_numba, density_numba, wind_sample_idx_numba, physics_step_numba
-            # warm-up calls with small dummy inputs (compile once)
-            _ = pressure_numba(101325.0, 8500.0, 1000.0)
-            _ = density_numba(101325.0, 8500.0, 288.15, 0.0289647, 8.314462618, 1000.0)
-            # wind warmup
-            wf = self.wind
-            # ensure we touch the grids; use grid center and these parameters
-            _ = wind_sample_idx_numba(wf.x_centers[0], wf.y_centers[0], wf.z_centers[0],
-                                      wf.x_range[0], wf.inv_dx, wf.y_range[0], wf.inv_dy, wf.z_range[0], wf.inv_dz,
-                                      wf.cells, wf._fx_grid, wf._fy_grid)
-            # physics warmup (dim-aware)
-            import numpy as np
-            pos = self._balloon.pos.astype(np.float64, copy=True)
-            vel = self._balloon.vel.astype(np.float64, copy=True)
-            ext = np.zeros_like(pos)
-            ctrl = np.zeros_like(pos)
-            physics_step_numba(pos, vel, 0.01, self._balloon.mass, 9.81, 0.5, 1.0, 1.2, self._balloon.volume, ext, ctrl)
-        except Exception:
-            pass  # if numba missing or compilation deferred, no problem
+        global _JIT_WARMED
+        if not _JIT_WARMED:
+            try:
+                from environments.core.jit_kernels import pressure_numba, density_numba, wind_sample_idx_numba, physics_step_numba
+                # warm-up calls with small dummy inputs (compile once)
+                _ = pressure_numba(101325.0, 8500.0, 1000.0)
+                _ = density_numba(101325.0, 8500.0, 288.15, 0.0289647, 8.314462618, 1000.0)
+                # wind warmup
+                wf = self.wind
+                # ensure we touch the grids; use grid center and these parameters
+                _ = wind_sample_idx_numba(wf.x_centers[0], wf.y_centers[0], wf.z_centers[0],
+                                        wf.x_range[0], wf.inv_dx, wf.y_range[0], wf.inv_dy, wf.z_range[0], wf.inv_dz,
+                                        wf.cells, wf._fx_grid, wf._fy_grid)
+                # physics warmup (dim-aware)
+                import numpy as np
+                pos = self._balloon.pos.astype(np.float64, copy=True)
+                vel = self._balloon.vel.astype(np.float64, copy=True)
+                ext = np.zeros_like(pos)
+                ctrl = np.zeros_like(pos)
+                physics_step_numba(pos, vel, 0.01, self._balloon.mass, 9.81, 0.5, 1.0, 1.2, self._balloon.volume, ext, ctrl)
+            except Exception:
+                pass  # if numba missing or compilation deferred, no problem
+            _JIT_WARMED = True
 
         return observation, info
 
@@ -401,10 +393,10 @@ class Balloon3DEnv(gym.Env):
         # elif action == Actions.deflate.value:
         #     self._balloon.inflate(-self.cfg["inflate_rate"])
         # nothing → no volume change
-        effect = int(self._action_lut[action])
+        effect = int(self._action_lut[action])  # -1, 0, +1
 
         if effect:
-            self._balloon.inflate(effect * self.cfg["inflate_rate"])    # -1, 0, +1
+            self._balloon.inflate(effect * self.cfg["inflate_rate"])    # -1, 0, +1 * rate
 
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
         self.last_wind[:] = wind    # Cache for obs
@@ -413,7 +405,6 @@ class Balloon3DEnv(gym.Env):
         if self.dim == 1:
             control_force = np.array([0.0], dtype=np.float32)
         elif self.dim == 2:
-            # control_force = wind[:2].tolist() + [0.0]
             control_force = np.array([wind[0], wind[1], 0.0], dtype=np.float32)
         else:
             control_force = wind.astype(np.float32, copy=False)
@@ -436,37 +427,29 @@ class Balloon3DEnv(gym.Env):
             terminated = False
         self.truncated = self._time >= self.cfg["time_max"]
 
-        reward = distance_reward(
+        reward_total, reward_components, self._prev_distance = balloon_reward(
             balloon_pos=self._balloon.pos,
             goal_pos=self.goal,
+            velocity=self._balloon.vel,
             dim=self.dim,
             terminated=terminated,
-            punishment=self.cfg["punishment"]
+            punishment=self.cfg["punishment"],
+            prev_distance=getattr(self, "_prev_distance", float("inf")),
         )
 
-        # Give agent 'success target'
-        EPS = 5.0          # metres; tune
-        VEL_EPS = 0.2      # m/s; tune
+        components_for_info = dict(reward_components)
+        components_for_info["total"] = reward_total
 
-        on_target = abs(self._balloon.pos[0] - self.goal[0]) < EPS \
-            and abs(self._balloon.vel[0]) < VEL_EPS
-        if on_target:
-            reward += 0.1          # success bonus
-            # terminated = True       # Terminate on target reached. Removed so loon learns to hover.
+        info = self._get_info()
+        info.setdefault("reward_components", {}).update(components_for_info)
 
-        # Penalise velocity and action flips
-        # velocity_cost = self.alpha * abs(self._balloon.vel[0])   # Velocity cost weight
-        # flip_cost = self.beta * (action != self.prev_action)  # Penalise action flips
-
-        # reward -= (velocity_cost + flip_cost)
         self.prev_action = action
 
         # --- collect observation & info -----------------------------------
         obs = self._get_obs()
         if terminated or self.truncated:
             self.final_obs = obs
-
-        info = self._get_info()
+            info["terminal_observation"] = self.final_obs
 
         if self.render_mode == "human":
             # self._render_frame()
@@ -479,7 +462,7 @@ class Balloon3DEnv(gym.Env):
                 wind_sampler=self.wind.sample
             ))
 
-        return obs, reward, terminated, self.truncated, info
+        return obs, reward_total, terminated, self.truncated, info
 
     # ------------------------------------------------------------------
     def _get_info(self):

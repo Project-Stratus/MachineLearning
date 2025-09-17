@@ -12,6 +12,12 @@ import numpy as np
 from environments.core.constants import ALT_MAX
 
 
+def _normalise_distance(distance: float) -> float:
+    """Return a distance scaled to [-1, 0], clamped to avoid division by zero."""
+    normaliser = max(ALT_MAX, 1.0)
+    return -float(distance / normaliser)
+
+
 # ------------------------------------------------------------------ #
 # distance helpers (handle 1-, 2-, 3-D automatically)
 # ------------------------------------------------------------------ #
@@ -41,13 +47,64 @@ def distance_reward(
     terminated: bool,
     punishment: float,
 ) -> float:
-    """
-    Default reward: negative distance to goal, with a fixed punishment if the
-    episode ended in a crash (terminated==True).
-    """
+    """Negative normalised distance to goal with a crash punishment."""
     if terminated:
         return punishment
 
     distance = l2_distance(balloon_pos, goal_pos, dim)
-    normaliser = max(ALT_MAX, 1.0)
-    return -float(distance / normaliser)
+    return _normalise_distance(distance)
+
+
+def balloon_reward(
+    *,
+    balloon_pos: np.ndarray,
+    goal_pos: np.ndarray,
+    velocity: np.ndarray,
+    dim: int,
+    terminated: bool,
+    punishment: float,
+    prev_distance: float,
+    success_radius: float = 10.0,
+    success_speed: float = 0.2,
+    direction_scale: float = 0.05,
+) -> tuple[float, dict[str, float], float]:
+    """Composite reward used by the Balloon environments.
+
+    Returns the total reward, a component breakdown, and the updated
+    reference distance for the next step.
+    """
+
+    distance = l2_distance(balloon_pos, goal_pos, dim)
+
+    if terminated:
+        total = punishment
+        components = dict(distance=punishment, direction=0.0, reached=0.0)
+        return total, components, distance
+
+    # DISTANCE reward
+    # Normalised distance to goal, in [-1, 0]
+    distance_component = _normalise_distance(distance)
+
+    # DIRECTION reward
+    # Positive when distance is shrinking, negative when growing
+    # Scaled to [-1, 1] based on success_radius
+    distance_delta = float(prev_distance - distance)
+    if success_radius <= 0.0:
+        scaled_delta = 0.0
+    else:
+        scaled_delta = np.clip(distance_delta / success_radius, -1.0, 1.0)
+    direction_component = direction_scale * scaled_delta
+
+    # REACHED reward
+    # Bonus when near the target and moving slowly
+    speed = float(np.linalg.norm(velocity[:dim]))
+    reached = float(distance < success_radius and speed < success_speed)
+    reached_component = 0.3 * reached
+
+    total = distance_component + direction_component + reached_component
+    components = dict(
+        distance=distance_component,
+        direction=direction_component,
+        reached=reached_component,
+    )
+    return total, components, distance

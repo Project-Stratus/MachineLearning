@@ -1,3 +1,4 @@
+import sys
 import gymnasium as gym
 import os
 import torch
@@ -9,6 +10,7 @@ import pygame
 import multiprocessing as mp
 from typing import Callable
 import time
+from tqdm.auto import tqdm
 
 """
 Time param cheat sheet:
@@ -25,22 +27,28 @@ SAVE_PATH = "./models/ppo_model/"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
-# EPISODES = 1_000_000
-EPISODES = 200_000
-BATCH_SIZE = 256                  # Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
-# BATCH_SIZE = 128
-EPOCHS = 10
-HIDDEN_SIZES = [[256, 256, 256], [256, 256, 256]]
-EPSILON = 0.2
-LEARNING_RATE = [2e-4, 1e-3]
-GAMMA = 0.99
-REWARD_THRESHOLD = -0.05  # Stop training when the model reaches this reward
+TRAIN_CFG = dict(
+    batch_size = 128,           # Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
+    n_epochs = 4,
+    n_steps = 256,              # rollout size = N_ENVS * N_STEPS (~2048-4096)
+    learning_rate = 3e-4,       # [2e-4, 1e-3],
+    gamma = 0.99,
+    clip_range = 0.2,
+    ent_coef = 0.01,            # 0.0 = no entropy bonus, 0.01 = small bonus to encourage exploration (add/remove randomness)
+)
 
+POLICY_KWARGS = dict(
+    net_arch = dict(pi=[64, 64], vf=[64, 64]),        # [[256, 256, 256], [256, 256, 256]],
+    activation_fn = torch.nn.Tanh
+)
+
+TOTAL_TIMESTEPS = 5_000_000  # Total training steps
+EVAL_FREQ = 500_000  # Evaluate every n steps
+REWARD_THRESHOLD = -0.05  # Stop training when the model reaches this reward
 DIM = 1     # 1, 2, or 3 for 1D, 2D, or 3D environments respectively.
 
-N_ENVS = min(8, max(2, os.cpu_count() - 1))
-N_STEPS = 256           # rollout size = N_ENVS * N_STEPS (~2048-4096)
-
+MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
+N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() //2))
 
 def make_env_fn(rank: int) -> Callable[[], gym.Env]:
     def _thunk():
@@ -62,14 +70,17 @@ def train(verbose=0, render_freq=None) -> None:
     # env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
 
     # Try SubprocVecEnv; fall back to DummyVecEnv if pickling fails
-    try:
-        # On macOS/Windows, safer to use "spawn"
-        if mp.get_start_method(allow_none=True) != "spawn":
-            mp.set_start_method("spawn", force=True)
-        venv = SubprocVecEnv([make_env_fn(i) for i in range(N_ENVS)])
-    except Exception as e:
-        print(f"SubprocVecEnv failed ({e}). Falling back to DummyVecEnv (no true parallelism).")
-        venv = DummyVecEnv([make_env_fn(i) for i in range(N_ENVS)])
+    if N_ENVS != 1:
+        try:
+            # On macOS/Windows, safer to use "spawn"
+            if mp.get_start_method(allow_none=True) != "spawn":
+                mp.set_start_method("spawn", force=True)
+            venv = SubprocVecEnv([make_env_fn(i) for i in range(N_ENVS)])
+        except Exception as e:
+            print(f"SubprocVecEnv failed ({e}). Falling back to DummyVecEnv (no true parallelism).")
+            venv = DummyVecEnv([make_env_fn(i) for i in range(N_ENVS)])
+    else:
+        venv = DummyVecEnv([make_env_fn(0)])
 
     print(f"Training with {N_ENVS} environments.")
 
@@ -78,14 +89,10 @@ def train(verbose=0, render_freq=None) -> None:
     model = PPO(
         "MlpPolicy",
         env,
-        batch_size=BATCH_SIZE,
-        n_steps=N_STEPS,
-        n_epochs=EPOCHS,
-        gamma=GAMMA,
-        learning_rate=LEARNING_RATE[0],
-        clip_range=EPSILON,
         verbose=verbose,
-        device=device
+        device=device,
+        **TRAIN_CFG,
+        policy_kwargs=POLICY_KWARGS
     )
 
     # Create an evaluation callback (no vectorisation needed)
@@ -100,16 +107,44 @@ def train(verbose=0, render_freq=None) -> None:
         callback_on_new_best=stop_callback,
         best_model_save_path=SAVE_PATH,
         log_path=SAVE_PATH,
-        eval_freq=100_000,
+        eval_freq=EVAL_FREQ,
         deterministic=True,
         render=False
     )
 
-    tqdm_callback = ProgressBarCallback()
+    # Progress bar callback
+    class InfoProgressBar(ProgressBarCallback):
+        def __init__(self, description: str, postfix: dict | None = None):
+            super().__init__()
+            self._description = description
+            self._postfix = postfix or {}
+
+        def _resolve_bar(self):
+            return getattr(self, "progress_bar", None) or getattr(self, "pbar", None)
+
+        def _on_training_start(self) -> None:
+            super()._on_training_start()
+            bar = self._resolve_bar()
+            if bar is not None:
+                bar.set_description_str(self._description)
+                if self._postfix:
+                    bar.set_postfix(self._postfix, refresh=False)
+
+        def _on_step(self) -> bool:
+            bar = self._resolve_bar()
+            if bar is not None and self._postfix:
+                bar.set_postfix(self._postfix, refresh=False)
+            return super()._on_step()
+
+
+    tqdm_callback = InfoProgressBar(
+        description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
+        postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
+    )
     callback = CallbackList([tqdm_callback, eval_callback])
 
     # Train the model
-    model.learn(total_timesteps=EPISODES*BATCH_SIZE, callback=callback)
+    model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback)
 
     # Save the model
     if not os.path.exists(SAVE_PATH):
@@ -119,13 +154,27 @@ def train(verbose=0, render_freq=None) -> None:
 
 # Load the final model from the previous training run, and dipslay it playing the environment
 def test() -> None:
-    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=DIM, disable_env_checker=True))
+    from environments.envs.balloon_3d_env import Actions
+
+    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=DIM, disable_env_checker=True, config={"time_max": 2_000}))
 
     # Use a GPU if possible
     device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
 
     # Load the model
     model = PPO.load(os.path.join(SAVE_PATH, "ppo"), device=device)
+
+    from environments.envs.balloon_3d_env import Balloon3DEnv
+
+    model = PPO.load("models/ppo_model/ppo", device="cpu")
+    env_temp = Balloon3DEnv(dim=1, render_mode=None)
+
+    obs, _ = env_temp.reset(seed=42)
+    obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)
+
+    dist = model.policy.get_distribution(obs_tensor)
+    print("action probs:", dist.distribution.probs.detach().cpu().numpy())
+    print("logits:", dist.distribution.logits.detach().cpu().numpy())
 
     # Record the specified number of episodes
     for episode in range(10):
@@ -135,10 +184,19 @@ def test() -> None:
         steps = 0
         while not game_over:
             steps += 1
-            action, _states = model.predict(state, deterministic=True)
-            # action = env.action_space.sample()      # Uncomment to override with random actions
-            next_state, reward, terminated, truncated, info = env.step(action)
-            print(f"Action: {action}, Reward: {reward}")
+            action_idx, _states = model.predict(state, deterministic=False)     # Switch to true when distribution learns to favour correct action
+            # action_idx = env.action_space.sample()      # Uncomment to override with random actions
+            next_state, reward, terminated, truncated, info = env.step(action_idx)
+
+            effect = int(env.unwrapped._action_lut[action_idx])
+            text_action = (Actions(effect).name if effect in Actions._value2member_map_ else "UNKNOWN").upper()
+
+            components = info.get("reward_components", {})
+            reward_distance = components.get("distance", 0.0)
+            reward_direction = components.get("direction", 0.0)
+            reward_reached = components.get("reached", 0.0)
+            print(f"|| Ep {episode+1} || Action: {text_action} ({effect:+d}) || Reward: {reward:+.4f} || Components: [Distance: {reward_distance:+.4f}, Direction: {reward_direction:+.4f}, Reached: {reward_reached:+.4f}] ||")
+
             state = next_state
             game_over = terminated or truncated
 
