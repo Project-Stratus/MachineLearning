@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 import numpy as np
 
+from environments.core.constants import ALT_MAX
+
 
 # ------------------------------------------------------------------ #
 # distance helpers (handle 1-, 2-, 3-D automatically)
@@ -37,7 +39,7 @@ def distance_reward(
     goal_pos: np.ndarray,
     dim: int,
     terminated: bool,
-    punishment: float = -400.0,
+    punishment: float,
 ) -> float:
     """
     Default reward: negative distance to goal, with a fixed punishment if the
@@ -45,4 +47,7 @@ def distance_reward(
     """
     if terminated:
         return punishment
-    return -l2_distance(balloon_pos, goal_pos, dim)
+
+    distance = l2_distance(balloon_pos, goal_pos, dim)
+    normaliser = max(ALT_MAX, 1.0)
+    return -float(distance / normaliser)

@@ -94,8 +94,8 @@ class Balloon3DEnv(gym.Env):
     # sensible defaults – override by *config*
     DEFAULTS: Dict[str, Any] = dict(
         dim=3,                    # 1, 2 or 3 dimensions
-        time_max=1_000,           # steps per episode
-        punishment=-400.0,        # reward on crash
+        time_max=10_000,           # steps per episode
+        punishment=-5.0,        # reward on crash
         x_range=(-2_000.0, 2_000.0),
         y_range=(-2_000.0, 2_000.0),
         z_range=(0.0, ALT_MAX),
@@ -451,8 +451,8 @@ class Balloon3DEnv(gym.Env):
         on_target = abs(self._balloon.pos[0] - self.goal[0]) < EPS \
             and abs(self._balloon.vel[0]) < VEL_EPS
         if on_target:
-            reward += 10.0          # success bonus
-            terminated = True       # optional but recommended
+            reward += 0.1          # success bonus
+            # terminated = True       # Terminate on target reached. Removed so loon learns to hover.
 
         # Penalise velocity and action flips
         # velocity_cost = self.alpha * abs(self._balloon.vel[0])   # Velocity cost weight

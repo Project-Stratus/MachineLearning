@@ -34,7 +34,7 @@ HIDDEN_SIZES = [[256, 256, 256], [256, 256, 256]]
 EPSILON = 0.2
 LEARNING_RATE = [2e-4, 1e-3]
 GAMMA = 0.99
-REWARD_THRESHOLD = 250
+REWARD_THRESHOLD = -0.05  # Stop training when the model reaches this reward
 
 DIM = 1     # 1, 2, or 3 for 1D, 2D, or 3D environments respectively.
 
@@ -92,7 +92,7 @@ def train(verbose=0, render_freq=None) -> None:
     eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
 
     stop_callback = StopTrainingOnRewardThreshold(
-        reward_threshold=320,  # Set your desired reward threshold here
+        reward_threshold=REWARD_THRESHOLD,
         verbose=1
     )
     eval_callback = EvalCallback(

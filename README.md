@@ -19,6 +19,7 @@ _Build an RL agent which can autonomously increase and decrease its altitude, ta
 
 ## Getting started
 - Setup the conda environment using either `requirements.txt` or `pyproject.toml`.
+- Specify python version
 - To run an existing model, run `main.py` with one of the following arguments:
     - `ppo` for the 1-D altitude model.
     - `dqn` for the 2-D x-y model.
