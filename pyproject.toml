@@ -2,14 +2,65 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["loon_v0"]
-
 [project]
-name = "loon_v0"
-version = "0.0.1"
+name = "project-stratus"
+version = "0.1.0"
+description = "Reinforcement learning agents and environments for Project Stratus balloon station-keeping."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
 dependencies = [
-  "gymnasium",
-  "pygame>=2.1.3",
-  "pre-commit",
+  "cloudpickle==3.1.1",
+  "contourpy==1.3.1",
+  "cycler==0.12.1",
+  "farama-notifications==0.0.4",
+  "filelock==3.17.0",
+  "fonttools==4.55.3",
+  "fsspec==2025.2.0",
+  "gymnasium==1.0.0",
+  "jinja2==3.1.5",
+  "kiwisolver==1.4.8",
+  "markupsafe==3.0.2",
+  "matplotlib==3.10.0",
+  "mpmath==1.3.0",
+  "networkx==3.4.2",
+  "numba>=0.60,<0.62",
+  "numpy==2.2.2",
+  "packaging==24.2",
+  "pandas==2.2.3",
+  "pillow==11.1.0",
+  "pygame==2.6.1",
+  "pyparsing==3.2.1",
+  "python-dateutil==2.9.0.post0",
+  "pytz==2025.1",
+  "six==1.17.0",
+  "stable-baselines3[extra]==2.5.0",
+  "sympy==1.13.1",
+  "torch==2.6.0",
+  "triton==3.2.0",
+  "typing_extensions==4.12.2",
+  "tzdata==2025.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pre-commit>=3.7",
+  "pytest",
+  "pyqt5>=5.15",
+  "opencv-python-headless>=4.10.0.84",
+]
+gpu = [
+  "nvidia-cublas-cu12==12.4.5.8",
+  "nvidia-cuda-cupti-cu12==12.4.127",
+  "nvidia-cuda-nvrtc-cu12==12.4.127",
+  "nvidia-cuda-runtime-cu12==12.4.127",
+  "nvidia-cudnn-cu12==9.1.0.70",
+  "nvidia-cufft-cu12==11.2.1.3",
+  "nvidia-curand-cu12==10.3.5.147",
+  "nvidia-cusolver-cu12==11.6.1.9",
+  "nvidia-cusparse-cu12==12.3.1.170",
+  "nvidia-cusparselt-cu12==0.6.2",
+  "nvidia-nccl-cu12==2.21.5",
+  "nvidia-nvjitlink-cu12==12.4.127",
+  "nvidia-nvtx-cu12==12.4.127",
 ]
