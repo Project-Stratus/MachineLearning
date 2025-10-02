@@ -195,7 +195,16 @@ def test(dim) -> None:
             reward_distance = components.get("distance", 0.0)
             reward_direction = components.get("direction", 0.0)
             reward_reached = components.get("reached", 0.0)
-            print(f"|| Ep {episode+1} || Step {steps:>6} || Action: {text_action} || Reward: {reward:+.4f} || Components: [Distance: {reward_distance:+.4f}, Direction: {reward_direction:+.4f}, Reached: {reward_reached:+.4f}] ||")
+            reward_effect = components.get("effect", 0.0)
+            print(f"|| Ep {episode+1} ",
+                  f"|| Step {steps:>6} ",
+                  f"|| Action: {text_action} ",
+                  f"|| Reward: {reward:+.4f} ",
+                  f"|| Components: [Distance: {reward_distance:+.4f}, ",
+                  f"Direction: {reward_direction:+.4f}, ",
+                  f"Reached: {reward_reached:+.4f}], ",
+                  f"Effect: {reward_effect:+.4f} ||"
+                   )
 
             state = next_state
             game_over = terminated or truncated

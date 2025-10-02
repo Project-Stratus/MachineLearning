@@ -7,7 +7,7 @@ import pytest
 from environments.core.atmosphere import Atmosphere
 from environments.core.balloon import Balloon
 from environments.envs.balloon_3d_env import Balloon3DEnv
-from environments.envs.reward import balloon_reward
+from environments.core.reward import balloon_reward
 
 
 # ---------------------------------------------------------------------
@@ -115,12 +115,14 @@ def test_balloon3d_reward_direction_positive():
     pos = np.array([10.0])
     goal = np.array([0.0])
     vel = np.array([-1.5])  # moving toward the goal
+    effect = 0
     total, components, updated = balloon_reward(
         balloon_pos=pos,
         goal_pos=goal,
         velocity=vel,
         dim=1,
         terminated=False,
+        effect=effect,
         punishment=-5.0,
         prev_distance=12.0,
         success_radius=5.0,
@@ -137,12 +139,14 @@ def test_balloon_reward_crash_returns_punishment():
     pos = np.array([0.0, 0.0, 0.0])
     goal = np.array([0.0, 0.0, 10.0])
     vel = np.zeros(3)
+    effect = 0
     total, components, updated = balloon_reward(
         balloon_pos=pos,
         goal_pos=goal,
         velocity=vel,
         dim=3,
         terminated=True,
+        effect=effect,
         punishment=-5.0,
         prev_distance=15.0,
         success_radius=5.0,
