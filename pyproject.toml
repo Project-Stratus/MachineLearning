@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -64,3 +64,11 @@ gpu = [
   "nvidia-nvjitlink-cu12==12.4.127",
   "nvidia-nvtx-cu12==12.4.127",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "src/agents",
+  "src/environments",
+  "src/models",
+  # REMINDER: Do not list src and ensure src/__init__.py does NOT exist
+  ]

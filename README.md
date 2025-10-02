@@ -20,8 +20,10 @@ From an ML perspective, there are several core areas of the project to be develo
 ## Getting started
 ### Prerequisites
 - Python 3.11 (via `conda`, `pyenv`, or system install)
-- `pip` 23+ and a working C/C++ toolchain (build-essential / Xcode CLT / MSVC)
-- Optional: NVIDIA driver + CUDA 12.4 runtime for the `gpu` extra
+- Recent pip and build tooling:
+  - `python -m pip install -U pip hatchling build`
+  - A C/C++ toolchain (Linux: `build-essential`; macOS: Xcode CLT; Windows: MSVC Build Tools)
+- Optional (for `gpu` extra): NVIDIA driver compatible with CUDA 12.4 and CUDA 12.4 runtime
 
 ### Set up your workspace
 1. `git clone <git@github.com:Project-Stratus/MachineLearning.git>` (SSH)
@@ -29,25 +31,27 @@ From an ML perspective, there are several core areas of the project to be develo
 3. Create an isolated environment
    - Conda: `conda create -n Stratus python=3.11`
    - venv: `python -m venv .venv`
-4. Activate it (`conda activate Stratus` or `source .venv/bin/activate`)
+4. Activate it
+  - Conda: `conda activate Stratus`
+  - venv (bash/zsh): `source .venv/bin/activate`
 
 ### Install from pyproject
-- Core runtime only: `pip install -e .`
+- Core runtime: `pip install -e .`
 - Development tooling (recommended): `pip install -e .[dev]`
 - GPU-enabled training stack: `pip install -e .[dev,gpu]`
-- Legacy scripts that still consume `requirements.txt` can run `pip install -r requirements.txt`; it resolves to the editable install above.
+- Legacy scripts that still consume `requirements.txt` can run `pip install -r requirements.txt` - NOT recommended
 
 ### Smoke tests
+- Run install check: `python tests/check_install.py --build --pip-check`
 - Run unit/integration tests: `pytest`
-- Check inference: `python main.py ppo`
 
 **For contribution guidelines and PR expectations, see `CONTRIBUTING.md`.**
 
 ## Basic repo layout:
-- `agents/`: reinforcement-learning agents (PPO, DQN) and their training/eval logic
 - `EDA/`: exploratory analyses, notebooks, and supporting scripts for balloon data
-- `environments/`: gym-compatible Balloon3D environment, physics core, renderers, rewards
-- `models/`: persisted checkpoints and training artefacts
+- `src/agents/`: reinforcement-learning agents (PPO, DQN) and their training/eval logic
+- `src/environments/`: gym-compatible Balloon3D environment, physics core, renderers, rewards
+- `src/models/`: persisted checkpoints and training artefacts
 - `tests/`: pytest suite covering atmosphere, balloon physics, environment, and rewards
 
 ## Loon data:

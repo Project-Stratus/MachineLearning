@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 import torch
 
-from agents.dqn_agent import DQNAgent
+from agents.old.dqn_agent import DQNAgent
 from environments.envs.old.balloon_2d_env import Balloon2DEnv
 
 
