@@ -23,7 +23,8 @@ Time param cheat sheet:
 
 
 ENVIRONMENT_NAME = "environments/Balloon3D-v0"
-SAVE_PATH = "./models/ppo_model/"
+SAVE_PATH = "./src/models/ppo_model/"
+MODEL_PATH = SAVE_PATH + "ppo"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
 
@@ -107,7 +108,7 @@ def train(dim, verbose=0, render_freq=None) -> None:
         best_model_save_path=SAVE_PATH,
         log_path=SAVE_PATH,
         eval_freq=EVAL_FREQ,
-        deterministic=True,
+        deterministic=True, 
         render=False
     )
 
@@ -148,7 +149,7 @@ def train(dim, verbose=0, render_freq=None) -> None:
     # Save the model
     if not os.path.exists(SAVE_PATH):
         os.makedirs(SAVE_PATH)
-    model.save(os.path.join(SAVE_PATH, "ppo"))
+    model.save(MODEL_PATH)
 
 
 # Load the final model from the previous training run, and dipslay it playing the environment
@@ -161,11 +162,11 @@ def test(dim) -> None:
     device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
 
     # Load the model
-    model = PPO.load(os.path.join(SAVE_PATH, "ppo"), device=device)
+    model = PPO.load(MODEL_PATH, device=device)
 
     from environments.envs.balloon_3d_env import Balloon3DEnv
 
-    model = PPO.load("models/ppo_model/ppo", device="cpu")
+    model = PPO.load(MODEL_PATH, device="cpu")
     env_temp = Balloon3DEnv(dim=1, render_mode=None)
 
     obs, _ = env_temp.reset(seed=42)
@@ -194,7 +195,7 @@ def test(dim) -> None:
             reward_distance = components.get("distance", 0.0)
             reward_direction = components.get("direction", 0.0)
             reward_reached = components.get("reached", 0.0)
-            print(f"|| Ep {episode+1} || Action: {text_action} ({effect:+d}) || Reward: {reward:+.4f} || Components: [Distance: {reward_distance:+.4f}, Direction: {reward_direction:+.4f}, Reached: {reward_reached:+.4f}] ||")
+            print(f"|| Ep {episode+1} || Step {steps:>6} || Action: {text_action} || Reward: {reward:+.4f} || Components: [Distance: {reward_distance:+.4f}, Direction: {reward_direction:+.4f}, Reached: {reward_reached:+.4f}] ||")
 
             state = next_state
             game_over = terminated or truncated
