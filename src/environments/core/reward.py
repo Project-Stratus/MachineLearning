@@ -62,6 +62,7 @@ def balloon_reward(
     velocity: np.ndarray,
     dim: int,
     terminated: bool,
+    effect: int,
     punishment: float,
     prev_distance: float,
     success_radius: float = 150.0,      # radius (m)
@@ -101,10 +102,19 @@ def balloon_reward(
     reached = float(distance < success_radius and speed < success_speed)
     reached_component = 0.3 * reached
 
-    total = distance_component + direction_component + reached_component
+    # DO NOTHING reward
+    # Small bonus for taking no action (effect=0)
+    # Likely to be replaced by some sort of 'energy' measure
+    if effect == 0:
+        effect_component = 0.3
+    else:
+        effect_component = 0.0
+
+    total = distance_component + direction_component + reached_component + effect_component
     components = dict(
         distance=distance_component,
         direction=direction_component,
         reached=reached_component,
+        effect=effect_component,
     )
     return total, components, distance

@@ -75,7 +75,7 @@ import pygame
 from environments.core.balloon import Balloon
 from environments.core.atmosphere import Atmosphere
 from environments.core.wind_field import WindField
-from environments.envs.reward import balloon_reward, l2_distance
+from environments.core.reward import balloon_reward, l2_distance
 from environments.render.pygame_render import PygameRenderer
 from environments.core.constants import VOL_MAX, ALT_MAX, VEL_MAX, P_MAX, DT
 
@@ -433,6 +433,7 @@ class Balloon3DEnv(gym.Env):
             velocity=self._balloon.vel,
             dim=self.dim,
             terminated=terminated,
+            effect=effect,
             punishment=self.cfg["punishment"],
             prev_distance=getattr(self, "_prev_distance", float("inf")),
         )

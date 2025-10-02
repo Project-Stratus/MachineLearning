@@ -7,7 +7,7 @@ import pytest
 from environments.core.atmosphere import Atmosphere
 from environments.core.balloon import Balloon
 from environments.envs.balloon_3d_env import Balloon3DEnv
-from environments.envs.reward import balloon_reward
+from environments.core.reward import balloon_reward
 
 
 # ---------------------------------------------------------------------
