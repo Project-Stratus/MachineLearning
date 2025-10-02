@@ -28,22 +28,23 @@ From an ML perspective, there are several core areas of the project to be develo
 ### Set up your workspace
 1. `git clone <git@github.com:Project-Stratus/MachineLearning.git>` (SSH)
 2. `cd MachineLearning`
-3. Create an isolated environment
+3. Create an isolated environment:
    - Conda: `conda create -n Stratus python=3.11`
    - venv: `python -m venv .venv`
-4. Activate it
-  - Conda: `conda activate Stratus`
-  - venv (bash/zsh): `source .venv/bin/activate`
+4. Activate it:
+    - Conda: `conda activate Stratus`
+    - venv (bash/zsh): `source .venv/bin/activate`
 
 ### Install from pyproject
+Run ONE of these options depending on your intention:
 - Core runtime: `pip install -e .`
 - Development tooling (recommended): `pip install -e .[dev]`
 - GPU-enabled training stack: `pip install -e .[dev,gpu]`
-- Legacy scripts that still consume `requirements.txt` can run `pip install -r requirements.txt` - NOT recommended
+- Legacy scripts that still use `requirements.txt` (NOT recommended): `pip install -r requirements.txt`
 
 ### Smoke tests
-- Run install check: `python tests/check_install.py --build --pip-check`
-- Run unit/integration tests: `pytest`
+1. Run install check: `python tests/check_install.py --build --pip-check`
+2. Run unit/integration tests: `pytest`
 
 **For contribution guidelines and PR expectations, see `CONTRIBUTING.md`.**
 
@@ -59,7 +60,6 @@ Data below is flight data from _Loon_, a Google project with the similar goal of
 
 | Value                      | Loon | Stratus |
 |----------------------------|------|---------|
-| flight_id                  | ✔    | X      |
 | time                       | ✔    | ✔      |
 | latitude                   | ✔    | ✔      |
 | longitude                  | ✔    | ✔      |
@@ -69,7 +69,8 @@ Data below is flight data from _Loon_, a Google project with the similar goal of
 | earth_ir                   | ✔    | X      |
 | earth_ir_sensor_config     | ✔    | X      |
 | acs                        | ✔    | X      |
-| propeller_on               | ✔    | X      |
+| flight_id                  | ✔    | N/A    |
+| propeller_on               | ✔    | N/A    |
 
 <br>
 Data:
