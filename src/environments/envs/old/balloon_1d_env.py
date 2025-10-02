@@ -8,10 +8,10 @@ import gymnasium as gym
 from gymnasium import spaces
 import pygame
 import numpy as np
-from environments.envs.atmosphere import Atmosphere
-from environments.envs.balloon import Balloon
+from environments.core.atmosphere import Atmosphere
+from environments.core.balloon import Balloon
 
-from environments.constants import DT, VOL_MAX, ALT_MAX, VEL_MAX, P_MAX
+from environments.core.constants import DT, VOL_MAX, ALT_MAX, VEL_MAX, P_MAX
 
 
 class Actions(Enum):
