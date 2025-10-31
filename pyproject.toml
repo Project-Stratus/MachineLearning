@@ -35,11 +35,13 @@ dependencies = [
   "pytz==2025.1",
   "six==1.17.0",
   "stable-baselines3[extra]==2.5.0",
+  "sb3-contrib==2.5.0",
   "sympy==1.13.1",
   "torch==2.6.0",
   "triton==3.2.0",
   "typing_extensions==4.12.2",
   "tzdata==2025.1",
+  "tensorboard>=2.12,<3.0"
 ]
 
 [project.optional-dependencies]

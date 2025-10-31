@@ -2,6 +2,8 @@ import sys
 import gymnasium as gym
 import os
 import torch
+import glob
+import pandas as pd
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
@@ -12,6 +14,7 @@ from typing import Callable
 import time
 from tqdm.auto import tqdm
 
+from src.agents.utils import _gather_monitor_csvs
 """
 Time param cheat sheet:
 - BATCH_SIZE:   Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
@@ -27,6 +30,7 @@ SAVE_PATH = "./src/models/ppo_model/"
 MODEL_PATH = SAVE_PATH + "ppo"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
 USE_GPU = False
+SEED = 42
 
 TRAIN_CFG = dict(
     batch_size = 128,           # Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
@@ -45,7 +49,7 @@ POLICY_KWARGS = dict(
 
 TOTAL_TIMESTEPS = 5_000_000  # Total training steps
 EVAL_FREQ = 500_000  # Evaluate every n steps
-REWARD_THRESHOLD = -0.05  # Stop training when the model reaches this reward
+REWARD_THRESHOLD = 10_000  # Stop training when the model reaches this reward
 
 MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
 N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() //2))
@@ -67,36 +71,54 @@ def train(dim, verbose=0, render_freq=None) -> None:
     # Use a GPU if possible
     device = torch.device("cuda") if USE_GPU and torch.cuda.is_available() else torch.device("cpu")
 
-    # env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=DIM, disable_env_checker=True))
+    def make_env(env_id, seed, dim):
+        # Define at module level so it’s picklable for SubprocVecEnv
+        def _init():
+            env = gym.make(
+                env_id,
+                render_mode=None,
+                dim=dim,
+                disable_env_checker=True,
+            )
+            env = Monitor(env)
+            env.reset(seed=seed)
+            return env
+        return _init
 
-    # Try SubprocVecEnv; fall back to DummyVecEnv if pickling fails
-    if N_ENVS != 1:
-        try:
-            # On macOS/Windows, safer to use "spawn"
+    def build_vec_env(n_envs, env_id, dim, seed=SEED):
+        if n_envs != 1:
+            # On macOS/Windows, SubprocVecEnv needs "spawn"
             if mp.get_start_method(allow_none=True) != "spawn":
                 mp.set_start_method("spawn", force=True)
-            venv = SubprocVecEnv([make_env_fn(i) for i in range(N_ENVS)])
-        except Exception as e:
-            print(f"SubprocVecEnv failed ({e}). Falling back to DummyVecEnv (no true parallelism).")
-            venv = DummyVecEnv([make_env_fn(i) for i in range(N_ENVS)])
-    else:
-        venv = DummyVecEnv([make_env_fn(0)])
+            try:
+                venv = SubprocVecEnv([make_env(env_id, seed + i, dim) for i in range(n_envs)])
+            except Exception as e:
+                print(f"SubprocVecEnv failed ({e}). Falling back to DummyVecEnv.")
+                venv = DummyVecEnv([make_env(env_id, seed + i, dim) for i in range(n_envs)])
+        else:
+            venv = DummyVecEnv([make_env(env_id, seed, dim)])
 
-    print(f"Training with {N_ENVS} environments.")
+        # Write monitor CSV to disk to build training curves post-hoc
+        os.makedirs(SAVE_PATH, exist_ok=True)
+        monitor_file = os.path.join(SAVE_PATH, "train_monitor")     # We will create train_monitor.csv, train_monitor_1.csv, etc.
+        return VecMonitor(venv, filename=monitor_file)
 
-    env = VecMonitor(venv)
+    print(f"Training with {N_ENVS} environments, dim={dim}.")
+
+    env = VecMonitor(build_vec_env(N_ENVS, ENVIRONMENT_NAME, dim=dim, seed=SEED))
 
     model = PPO(
         "MlpPolicy",
         env,
         verbose=verbose,
         device=device,
+        tensorboard_log=SAVE_PATH,  # Tensorboard log dir
         **TRAIN_CFG,
         policy_kwargs=POLICY_KWARGS
     )
 
     # Create an evaluation callback (no vectorisation needed)
-    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True))
+    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True), filename=os.path.join(SAVE_PATH, "eval_monitor.csv"))
 
     stop_callback = StopTrainingOnRewardThreshold(
         reward_threshold=REWARD_THRESHOLD,
@@ -144,12 +166,35 @@ def train(dim, verbose=0, render_freq=None) -> None:
     callback = CallbackList([tqdm_callback, eval_callback])
 
     # Train the model
-    model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback)
+    model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"PPO_run_dim{dim}")
 
     # Save the model
-    if not os.path.exists(SAVE_PATH):
-        os.makedirs(SAVE_PATH)
     model.save(MODEL_PATH)
+
+    df = _gather_monitor_csvs(SAVE_PATH)
+    return df
+
+def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
+    """
+    Reads VecMonitor/Monitor CSVs and returns a tidy DataFrame with:
+      columns = ['episode_idx', 'r', 'l', 't', 'source']
+      r = episode return, l = episode length (steps), t = time since start (seconds)
+    """
+    files = sorted(glob.glob(os.path.join(log_dir, "train_monitor*.csv")))
+    dfs = []
+    for f in files:
+        # Monitor CSVs have commented headers with metadata; use comment='#'
+        d = pd.read_csv(f, comment="#")
+        # Add a monotonically increasing episode index per file then combine
+        d["episode_idx"] = range(1, len(d) + 1)
+        d["source"] = os.path.basename(f)
+        dfs.append(d[["episode_idx", "r", "l", "t", "source"]])
+    if not dfs:
+        return pd.DataFrame(columns=["episode_idx", "r", "l", "t", "source"])
+    df = pd.concat(dfs, ignore_index=True)
+    # If you want a single global episode index across all vec envs:
+    df["global_episode"] = range(1, len(df) + 1)
+    return df
 
 
 # Load the final model from the previous training run, and dipslay it playing the environment
@@ -200,10 +245,10 @@ def test(dim) -> None:
                   f"|| Step {steps:>6} ",
                   f"|| Action: {text_action} ",
                   f"|| Reward: {reward:+.4f} ",
-                  f"|| Components: [Distance: {reward_distance:+.4f}, ",
-                  f"Direction: {reward_direction:+.4f}, ",
-                  f"Reached: {reward_reached:+.4f}], ",
-                  f"Effect: {reward_effect:+.4f} ||"
+                  f"|| Components: [Dist.: {reward_distance:+.4f}, ",
+                  f"Dir.: {reward_direction:+.4f}, ",
+                  f"Rea.: {reward_reached:+.4f}, ",
+                  f"Eff.: {reward_effect:+.4f}] ||"
                    )
 
             state = next_state

@@ -8,12 +8,12 @@ _Build an RL agent which can autonomously control an atmospheric balloon. The ag
 Station-keeping high-altitude balloons have several key advantages over drones, satellites and ground-based systems. They can:
 - Provide large-scale wireless connectivity to rural areas.
 - Provide rapid response imagery/connectivity to sites of natural disasters
-- Short notice weather forecasting
+- Short/medium notice weather forecasting
 - They're cool
 
 ### Tasks
 From an ML perspective, there are several core areas of the project to be developed and enhanced.
-- Develop an accurate 3-D virtual environment for training. This environment would need to simulate real-world atmospheric conditions and feed the agent with data in the same format as it would receive from a real balloon.
+- Develop an accurate 3-D virtual environment for training. This environment would need to simulate real-world atmospheric conditions and feed the agent with data in the same format as it would receive from a real balloon. 
 - Develop an RL model which can control the balloon by increasing or decreasing altitude. Justify our RL framework based on the problem and literature and create an agent with a high performance in the virtual environment.
 - Use real world data. Take advantage of publicly available flight data to improve training and validation.
 
@@ -48,12 +48,21 @@ Run ONE of these options depending on your intention:
 
 **For contribution guidelines and PR expectations, see `CONTRIBUTING.md`.**
 
+### Accessing Tensorboard during training
+1. Run `tensorboard --logdir ./src/models/ppo_model/ --port 6006` in your terminal during training (If you've changed SAVE_DIR in the model file, update this accordingly.)
+2. Open `http://localhost:6006` in your browser.
+
 ## Basic repo layout:
 - `EDA/`: exploratory analyses, notebooks, and supporting scripts for balloon data
 - `src/agents/`: reinforcement-learning agents (PPO, DQN) and their training/eval logic
 - `src/environments/`: gym-compatible Balloon3D environment, physics core, renderers, rewards
 - `src/models/`: persisted checkpoints and training artefacts
 - `tests/`: pytest suite covering atmosphere, balloon physics, environment, and rewards
+
+## Progress
+We have a trained 1D agent with no external forces. From here, there are two major areas of development:
+1. Train the agent in a 3D environment with basic forces. This includes the prep for the VAE outputs.
+2. Develop the VAE, generative weather model and train on ECMWF data. 
 
 ## Loon data:
 Data below is flight data from _Loon_, a Google project with the similar goal of using high-altitude balloons. Below is a comparison of data recorded by the Loon and Stratus teams. Loon recorded flights between 2011 and 2021, a total of 218 flight-years and 127 million telemetry points.
