@@ -125,7 +125,7 @@ class Balloon3DEnv(gym.Env):
         self.alpha = cfg["alpha"]  # velocity cost weight
         self.beta = cfg["beta"]    # action-flip cost weight
 
-        assert self.dim in (1, 2, 3), "dim must be 1, 2 or 3"
+        assert self.dim in (1, 2, 3), f"dim must be 1, 2 or 3. Got {self.dim}."
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
 

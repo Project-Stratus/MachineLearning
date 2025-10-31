@@ -105,10 +105,11 @@ def balloon_reward(
     # DO NOTHING reward
     # Small bonus for taking no action (effect=0)
     # Likely to be replaced by some sort of 'energy' measure
-    if effect == 0:
-        effect_component = 0.3
-    else:
-        effect_component = 0.0
+    # if effect == 0:
+    #     effect_component = 0.001
+    # else:
+    #     effect_component = 0.0
+    effect_component = 0.0
 
     total = distance_component + direction_component + reached_component + effect_component
     components = dict(
