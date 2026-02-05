@@ -74,3 +74,12 @@ packages = [
   "src/models",
   # REMINDER: Do not list src and ensure src/__init__.py does NOT exist
   ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]

@@ -20,11 +20,15 @@ for 2D.
 =========
 Action space
 =========
-Discrete action space with three actions:
+Discrete(3) with action indices 0, 1, 2 mapped to effects:
 
-+ 1: Inflate balloon (increase volume).
-  0: Do nothing (no volume change).
-- 1: Deflate balloon (decrease volume).
+    Index | Effect | Description
+    ------|--------|---------------------------
+      0   |   -1   | Deflate (decrease volume)
+      1   |    0   | Do nothing
+      2   |   +1   | Inflate (increase volume)
+
+The mapping is defined in `_action_lut`.
 
 =========
 Observation space
@@ -64,7 +68,6 @@ to override any of them without sub-classing.
 """
 from __future__ import annotations
 
-import math
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -83,6 +86,7 @@ _JIT_WARMED = False  # whether numba JIT has been warmed up
 
 
 class Actions(Enum):
+    """Effect values for balloon volume control (not action indices)."""
     inflate = 1
     nothing = 0
     deflate = -1
@@ -106,9 +110,6 @@ class Balloon3DEnv(gym.Env):
         inflate_rate=0.01,       # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork"
-        alpha=0.05,                   # velocity cost weight
-        beta=0.01,                   # action-flip cost weight
-
     )
 
     def __init__(self,
@@ -122,9 +123,6 @@ class Balloon3DEnv(gym.Env):
         self.dim: int = cfg["dim"]
         self.wind_cfg_path = "environments/winds.json"
 
-        self.alpha = cfg["alpha"]  # velocity cost weight
-        self.beta = cfg["beta"]    # action-flip cost weight
-
         assert self.dim in (1, 2, 3), f"dim must be 1, 2 or 3. Got {self.dim}."
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -137,10 +135,27 @@ class Balloon3DEnv(gym.Env):
         self.z_range: Tuple[float, float] = cfg["z_range"]
         self.z0 = 0.5 * (self.z_range[0] + self.z_range[1])   # reference altitude
 
-        # precompute normalisation spans
-        self.inv_xspan = 0.0 if self.dim == 1 else 1.0 / (self.x_range[1] - self.x_range[0])
-        self.inv_yspan = 0.0 if self.dim <= 1 else 1.0 / (self.y_range[1] - self.y_range[0])
-        self.inv_zspan = 1.0 / (self.z_range[1] - self.z_range[0])
+        # Precompute normalisation arrays for vectorized position normalisation
+        # dim=1 uses z only, dim=2 uses x,y, dim=3 uses x,y,z
+        if self.dim == 1:
+            self._norm_offsets = np.array([self.z_range[0]], dtype=np.float32)
+            self._norm_scales = np.array([1.0 / (self.z_range[1] - self.z_range[0])], dtype=np.float32)
+            self._ranges = [self.z_range]
+        elif self.dim == 2:
+            self._norm_offsets = np.array([self.x_range[0], self.y_range[0]], dtype=np.float32)
+            self._norm_scales = np.array([
+                1.0 / (self.x_range[1] - self.x_range[0]),
+                1.0 / (self.y_range[1] - self.y_range[0])
+            ], dtype=np.float32)
+            self._ranges = [self.x_range, self.y_range]
+        else:  # dim == 3
+            self._norm_offsets = np.array([self.x_range[0], self.y_range[0], self.z_range[0]], dtype=np.float32)
+            self._norm_scales = np.array([
+                1.0 / (self.x_range[1] - self.x_range[0]),
+                1.0 / (self.y_range[1] - self.y_range[0]),
+                1.0 / (self.z_range[1] - self.z_range[0])
+            ], dtype=np.float32)
+            self._ranges = [self.x_range, self.y_range, self.z_range]
 
 
         # ------------------------------------------------------------------
@@ -245,25 +260,16 @@ class Balloon3DEnv(gym.Env):
         self._obs_buf[i] = pressure_norm[0]
         i += 1
         self._obs_buf[i:i+d] = wind
+        i += d
+        assert i == self._obs_size, f"Observation packing mismatch: packed {i}, expected {self._obs_size}"
         return self._obs_buf.copy()
 
     # ------------------------------------------------------------------
     # Normalisation helpers
     # ------------------------------------------------------------------
     def _normalise_position(self, pos: np.ndarray) -> np.ndarray:
-        # expect shape (dim,)
-        if self.dim == 1:
-            z = pos[0]
-            return np.array([(z - self.z_range[0]) * self.inv_zspan], dtype=np.float32)
-        elif self.dim == 2:
-            x, y = pos[:2]
-            return np.array([(x - self.x_range[0]) * self.inv_xspan,
-                             (y - self.y_range[0]) * self.inv_yspan], dtype=np.float32)
-        else:  # 3‑D
-            x, y, z = pos
-            return np.array([(x - self.x_range[0]) * self.inv_xspan,
-                             (y - self.y_range[0]) * self.inv_yspan,
-                             (z - self.z_range[0]) * self.inv_zspan], dtype=np.float32)
+        """Normalise position to [0,1] using pre-computed offsets and scales."""
+        return ((pos[:self.dim] - self._norm_offsets) * self._norm_scales).astype(np.float32)
 
 
     def _full_coords(self, pos: np.ndarray) -> Tuple[float, float, float]:
@@ -292,43 +298,18 @@ class Balloon3DEnv(gym.Env):
 
         # random starting position far enough from the goal (~500 m) to avoid trivial episodes
         while True:
-            if self.dim == 1:
-                z0 = self.np_random.uniform(*self.z_range)
-                pos0 = [z0]
-            elif self.dim == 2:
-                x0 = self.np_random.uniform(*self.x_range)
-                y0 = self.np_random.uniform(*self.y_range)
-                pos0 = [x0, y0]
-            else:
-                x0 = self.np_random.uniform(*self.x_range)
-                y0 = self.np_random.uniform(*self.y_range)
-                z0 = self.np_random.uniform(*self.z_range)
-                pos0 = [x0, y0, z0]
-
-            # random goal
-            if self.dim == 1:
-                zg = self.np_random.uniform(*self.z_range)
-                goal = np.array([zg])
-                dist = abs(z0 - zg)
-            elif self.dim == 2:
-                xg = self.np_random.uniform(*self.x_range)
-                yg = self.np_random.uniform(*self.y_range)
-                goal = np.array([xg, yg])
-                dist = math.hypot(x0 - xg, y0 - yg)
-            else:
-                xg = self.np_random.uniform(*self.x_range)
-                yg = self.np_random.uniform(*self.y_range)
-                zg = self.np_random.uniform(*self.z_range)
-                goal = np.array([xg, yg, zg])
-                dist = math.sqrt((x0 - xg) ** 2 + (y0 - yg) ** 2 + (z0 - zg) ** 2)
-
+            # Generate random position and goal using _ranges (appropriate for each dim)
+            pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
+            goal = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
+            dist = float(np.linalg.norm(pos0 - goal))
             if dist > 500.0:
                 break
 
         self.goal = goal
         self.goal_norm = self._normalise_position(self.goal).astype(np.float32)
         real_dim = 3 if self.dim == 2 else self.dim
-        init_pos = pos0 + [self.z0] if self.dim == 2 else pos0
+        # For 2D mode, balloon is internally 3D with fixed altitude z0
+        init_pos = np.append(pos0, self.z0) if self.dim == 2 else pos0
         self._balloon = Balloon(dim=real_dim,
                                 atmosphere=self._atmosphere,
                                 position=init_pos,
@@ -339,10 +320,7 @@ class Balloon3DEnv(gym.Env):
         info = self._get_info()
         self._prev_distance = l2_distance(self._balloon.pos, self.goal, self.dim)
 
-        try:
-            self.prev_action = Actions.nothing.value  # no action on reset
-        except AttributeError:
-            self.prev_action = Actions.deflate.value  # first action is deflate
+        self.prev_action = 1  # action index 1 = nothing (effect 0)
 
         if self.render_mode == "human":
             self._ensure_renderer()
@@ -387,13 +365,8 @@ class Balloon3DEnv(gym.Env):
     def step(self, action: int):
         assert self._balloon is not None, "Call reset() first."
 
-        # --- execute action ------------------------------------------------
-        # if action == Actions.inflate.value:
-        #     self._balloon.inflate(self.cfg["inflate_rate"])
-        # elif action == Actions.deflate.value:
-        #     self._balloon.inflate(-self.cfg["inflate_rate"])
-        # nothing → no volume change
-        effect = int(self._action_lut[action])  # -1, 0, +1
+        # Map action index (0,1,2) to effect (-1,0,+1) via lookup table
+        effect = int(self._action_lut[action])
 
         if effect:
             self._balloon.inflate(effect * self.cfg["inflate_rate"])    # -1, 0, +1 * rate

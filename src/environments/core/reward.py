@@ -6,7 +6,6 @@ Reusable reward helpers for the balloon environments.
 """
 
 from __future__ import annotations
-import math
 import numpy as np
 
 from environments.core.constants import ALT_MAX
@@ -24,17 +23,15 @@ def _normalise_distance(distance: float) -> float:
 def l2_distance(balloon_pos: np.ndarray, goal_pos: np.ndarray, dim: int) -> float:
     """
     Return Euclidean distance in the *active* dimensions:
-        dim=1 → |z - z_goal|
+        dim=1 → |z - z_goal|  (balloon uses last index for altitude)
         dim=2 → sqrt((x-xg)^2 + (y-yg)^2)
         dim=3 → full 3-D norm
     """
     if dim == 1:
+        # Special case: 1D uses last index for altitude
         return abs(balloon_pos[-1] - goal_pos[0])
-    elif dim == 2:
-        return math.hypot(balloon_pos[0] - goal_pos[0],
-                          balloon_pos[1] - goal_pos[1])
-    else:  # dim == 3
-        return float(np.linalg.norm(balloon_pos - goal_pos))
+    # For 2D/3D, compare first `dim` components
+    return float(np.linalg.norm(balloon_pos[:dim] - goal_pos[:dim]))
 
 
 # ------------------------------------------------------------------ #

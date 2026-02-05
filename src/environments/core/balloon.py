@@ -127,8 +127,9 @@ class Balloon:
             vol += amp * np.sin(2.0 * np.pi * t / 60.0)
         return vol
 
-    def buoyant_force(self, t: float) -> np.ndarray:
-        rho_air = self.atmosphere.density(self.pos[-1])
+    def buoyant_force(self, t: float, rho_air: float | None = None) -> np.ndarray:
+        if rho_air is None:
+            rho_air = self.atmosphere.density(self.pos[-1])
         f = np.zeros(self.dim)
         f[-1] = rho_air * G * self.dynamic_volume(t)
         return f
@@ -138,11 +139,12 @@ class Balloon:
         f[-1] = -self.mass * G
         return f
 
-    def drag_force(self) -> np.ndarray:
+    def drag_force(self, rho_air: float | None = None) -> np.ndarray:
         speed = np.linalg.norm(self.vel)
         if speed < 1e-8:
             return np.zeros(self.dim)
-        rho_air = self.atmosphere.density(self.pos[-1])
+        if rho_air is None:
+            rho_air = self.atmosphere.density(self.pos[-1])
         f_mag = 0.5 * CD * AREA * rho_air * speed**2
         return -f_mag * (self.vel / speed)
 
@@ -166,25 +168,20 @@ class Balloon:
         else:
             control_force = np.asarray(control_force, dtype=np.float64)
 
-        # common values
+        # Compute density once for this step (used by JIT and fallback paths)
         z = self.pos[-1]
-        # rho_air = self.atmosphere.density(z)
-        # vol = self.dynamic_volume(t)
-
         if _JIT_OK:
             rho_air = float(density_numba(self.atmosphere.p0, self.atmosphere.scale_height, self.atmosphere.temperature, self.atmosphere.molar_mass, R, z))
         else:
             rho_air = self.atmosphere.density(z)
         vol = self.dynamic_volume(t)
 
-        # if self.pos.dtype != np.float64: self.pos = self.pos.astype(np.float64, copy=False)
-        # if self.vel.dtype != np.float64: self.vel = self.vel.astype(np.float64, copy=False)
-
         if _JIT_OK:
             physics_step_numba(self.pos, self.vel, dt, self.mass, G, CD, AREA, rho_air, vol, external_force, control_force, int(self.dim))
         else:
-            # Fallback: your original pure-Python path
-            f_net = self.buoyant_force(t) + self.weight() + self.drag_force() + external_force + control_force
+            # Fallback: pure-Python path using cached rho_air
+            f_net = (self.buoyant_force(t, rho_air) + self.weight() +
+                     self.drag_force(rho_air) + external_force + control_force)
             acc = f_net / self.mass
             self.vel += acc * dt
             self.vel = np.clip(self.vel, -200.0, 200.0)

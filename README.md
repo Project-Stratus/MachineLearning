@@ -1,8 +1,8 @@
 # Project Stratus MachineLearning Repo
-Here is the Project Stratus repository for developing and maintaining **[name TBC]**, our RL agent for controlling an inflatable balloon with the aim of station-keeping it around a target location.
+Here is the Project Stratus repository for developing and maintaining our RL agent for controlling an inflatable balloon with the aim of station-keeping it around a target location.
 
 ## Objective
-_Build an RL agent which can autonomously control an atmospheric balloon. The agent's goal is to station-keep around a target location by increasing or decreasing it's altitude and taking advantage of wind currents._
+_Build an RL agent which can autonomously control an atmospheric balloon. The agent's goal is to station-keep around a target location by increasing or decreasing its altitude and taking advantage of wind currents._
 
 ### Why?
 Station-keeping high-altitude balloons have several key advantages over drones, satellites and ground-based systems. They can:
@@ -40,7 +40,6 @@ Run ONE of these options depending on your intention:
 - Core runtime: `pip install -e .`
 - Development tooling (recommended): `pip install -e .[dev]`
 - GPU-enabled training stack: `pip install -e .[dev,gpu]`
-- Legacy scripts that still use `requirements.txt` (NOT recommended): `pip install -r requirements.txt`
 
 ### Smoke tests
 1. Run install check: `python tests/check_install.py --build --pip-check`
@@ -48,21 +47,33 @@ Run ONE of these options depending on your intention:
 
 **For contribution guidelines and PR expectations, see `CONTRIBUTING.md`.**
 
+### Training & Running
+```bash
+python main.py ppo --train --dim 1           # Train PPO in 1D
+python main.py qrdqn --train --dim 2         # Train QR-DQN in 2D
+python main.py ppo --dim 3                   # Test PPO in 3D (no --train = inference)
+python main.py ppo --train --dim 1 --save_fig  # Train and save reward curve plot
+```
+
 ### Accessing Tensorboard during training
-1. Run `tensorboard --logdir ./src/models/ppo_model/ --port 6006` in your terminal during training (If you've changed SAVE_DIR in the model file, update this accordingly.)
+1. Run `tensorboard --logdir ./src/models/ --port 6006` in your terminal during training to view logs for all agents.
 2. Open `http://localhost:6006` in your browser.
 
 ## Basic repo layout:
 - `EDA/`: exploratory analyses, notebooks, and supporting scripts for balloon data
-- `src/agents/`: reinforcement-learning agents (PPO, DQN) and their training/eval logic
+- `src/agents/`: reinforcement-learning agents (PPO, QR-DQN) and their training/eval logic
 - `src/environments/`: gym-compatible Balloon3D environment, physics core, renderers, rewards
 - `src/models/`: persisted checkpoints and training artefacts
-- `tests/`: pytest suite covering atmosphere, balloon physics, environment, and rewards
+- `tests/`: pytest suite
+  - `core/`: atmosphere, balloon, reward, wind field tests
+  - `envs/`: environment and observation tests
+  - `agents/`: agent utility tests
+  - `integration/`: episode integration tests
 
 ## Progress
-We have a trained 1D agent with no external forces. From here, there are two major areas of development:
-1. Train the agent in a 3D environment with basic forces. This includes the prep for the VAE outputs.
-2. Develop the VAE, generative weather model and train on ECMWF data. 
+We have PPO and QR-DQN agents supporting 1D, 2D, and 3D environments. Current development areas:
+1. Train and evaluate agents in 3D environments with realistic wind fields.
+2. Develop a generative weather model and train on ECMWF data. 
 
 ## Loon data:
 Data below is flight data from _Loon_, a Google project with the similar goal of using high-altitude balloons. Below is a comparison of data recorded by the Loon and Stratus teams. Loon recorded flights between 2011 and 2021, a total of 218 flight-years and 127 million telemetry points.
@@ -88,7 +99,7 @@ https://zenodo.org/records/5119968#.YVNdiGZKio5
 
 ## Testing / CI / CD
 - Run the whole suite locally with `pytest`; this mirrors the GitHub Actions workflow.
-- Scope to a module while iterating, e.g. `pytest tests/envs_test.py -k balloon`.
+- Scope to a module while iterating, e.g. `pytest tests/envs/ -k balloon`.
 - Ensure new features include coverage in `tests/` and update fixtures when interfaces change.
 - Record any longer training validations in your PR description (see `CONTRIBUTING.md`).
 - CI validates pull requests with the same commands; keep failures red/green before requesting review.

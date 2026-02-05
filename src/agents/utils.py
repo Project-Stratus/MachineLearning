@@ -1,6 +1,8 @@
 import glob
 import os
 import pandas as pd
+from stable_baselines3.common.callbacks import ProgressBarCallback
+
 
 def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
     """
@@ -23,3 +25,29 @@ def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
     # If you want a single global episode index across all vec envs:
     df["global_episode"] = range(1, len(df) + 1)
     return df
+
+
+class InfoProgressBar(ProgressBarCallback):
+    """Progress bar callback with custom description and postfix."""
+
+    def __init__(self, description: str, postfix: dict | None = None):
+        super().__init__()
+        self._description = description
+        self._postfix = postfix or {}
+
+    def _resolve_bar(self):
+        return getattr(self, "progress_bar", None) or getattr(self, "pbar", None)
+
+    def _on_training_start(self) -> None:
+        super()._on_training_start()
+        bar = self._resolve_bar()
+        if bar is not None:
+            bar.set_description_str(self._description)
+            if self._postfix:
+                bar.set_postfix(self._postfix, refresh=False)
+
+    def _on_step(self) -> bool:
+        bar = self._resolve_bar()
+        if bar is not None and self._postfix:
+            bar.set_postfix(self._postfix, refresh=False)
+        return super()._on_step()

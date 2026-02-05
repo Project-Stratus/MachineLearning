@@ -1,17 +1,14 @@
 # qr_dqn_runner.py
 import os
-import glob
 import time
+
 import gymnasium as gym
 import torch
-import pandas as pd
-from typing import Callable
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, CallbackList
 from sb3_contrib import QRDQN
-from tqdm.auto import tqdm
 
-from src.agents.utils import _gather_monitor_csvs
+from agents.utils import _gather_monitor_csvs, InfoProgressBar
 
 # ---- Config ----
 ENVIRONMENT_NAME = "environments/Balloon3D-v0"
@@ -107,29 +104,6 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
     )
 
     stop_cb = StopTrainingOnRewardThreshold(reward_threshold=REWARD_THRESHOLD, verbose=1)
-
-    class InfoProgressBar(ProgressBarCallback):
-        def __init__(self, description: str, postfix: dict | None = None):
-            super().__init__()
-            self._description = description
-            self._postfix = postfix or {}
-
-        def _resolve_bar(self):
-            return getattr(self, "progress_bar", None) or getattr(self, "pbar", None)
-
-        def _on_training_start(self) -> None:
-            super()._on_training_start()
-            bar = self._resolve_bar()
-            if bar is not None:
-                bar.set_description_str(self._description)
-                if self._postfix:
-                    bar.set_postfix(self._postfix, refresh=False)
-
-        def _on_step(self) -> bool:
-            bar = self._resolve_bar()
-            if bar is not None and self._postfix:
-                bar.set_postfix(self._postfix, refresh=False)
-            return super()._on_step()
 
     eval_cb = EvalCallback(
         eval_env,

@@ -1,20 +1,17 @@
-import sys
-import gymnasium as gym
 import os
-import torch
-import glob
-import pandas as pd
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
-from stable_baselines3.common.monitor import Monitor
-import pygame
+import time
 import multiprocessing as mp
 from typing import Callable
-import time
-from tqdm.auto import tqdm
 
-from src.agents.utils import _gather_monitor_csvs
+import gymnasium as gym
+import pygame
+import torch
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, CallbackList
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
+from stable_baselines3.common.monitor import Monitor
+
+from agents.utils import _gather_monitor_csvs, InfoProgressBar
 """
 Time param cheat sheet:
 - BATCH_SIZE:   Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
@@ -134,31 +131,6 @@ def train(dim, verbose=0, render_freq=None) -> None:
         render=False
     )
 
-    # Progress bar callback
-    class InfoProgressBar(ProgressBarCallback):
-        def __init__(self, description: str, postfix: dict | None = None):
-            super().__init__()
-            self._description = description
-            self._postfix = postfix or {}
-
-        def _resolve_bar(self):
-            return getattr(self, "progress_bar", None) or getattr(self, "pbar", None)
-
-        def _on_training_start(self) -> None:
-            super()._on_training_start()
-            bar = self._resolve_bar()
-            if bar is not None:
-                bar.set_description_str(self._description)
-                if self._postfix:
-                    bar.set_postfix(self._postfix, refresh=False)
-
-        def _on_step(self) -> bool:
-            bar = self._resolve_bar()
-            if bar is not None and self._postfix:
-                bar.set_postfix(self._postfix, refresh=False)
-            return super()._on_step()
-
-
     tqdm_callback = InfoProgressBar(
         description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
         postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
@@ -172,28 +144,6 @@ def train(dim, verbose=0, render_freq=None) -> None:
     model.save(MODEL_PATH)
 
     df = _gather_monitor_csvs(SAVE_PATH)
-    return df
-
-def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
-    """
-    Reads VecMonitor/Monitor CSVs and returns a tidy DataFrame with:
-      columns = ['episode_idx', 'r', 'l', 't', 'source']
-      r = episode return, l = episode length (steps), t = time since start (seconds)
-    """
-    files = sorted(glob.glob(os.path.join(log_dir, "train_monitor*.csv")))
-    dfs = []
-    for f in files:
-        # Monitor CSVs have commented headers with metadata; use comment='#'
-        d = pd.read_csv(f, comment="#")
-        # Add a monotonically increasing episode index per file then combine
-        d["episode_idx"] = range(1, len(d) + 1)
-        d["source"] = os.path.basename(f)
-        dfs.append(d[["episode_idx", "r", "l", "t", "source"]])
-    if not dfs:
-        return pd.DataFrame(columns=["episode_idx", "r", "l", "t", "source"])
-    df = pd.concat(dfs, ignore_index=True)
-    # If you want a single global episode index across all vec envs:
-    df["global_episode"] = range(1, len(df) + 1)
     return df
 
 
