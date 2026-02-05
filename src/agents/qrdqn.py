@@ -3,11 +3,13 @@ import os
 import time
 
 import gymnasium as gym
+import pandas as pd
 import torch
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, CallbackList
 from sb3_contrib import QRDQN
 
+import environments  # registers the Balloon3D-v0 environment
 from agents.utils import _gather_monitor_csvs, InfoProgressBar
 
 # ---- Config ----
@@ -45,6 +47,11 @@ TOTAL_TIMESTEPS = 1_500_000
 EVAL_FREQ = 1_000_000
 REWARD_THRESHOLD = 10_000  # stop early on good performance
 
+# Environment config overrides (passed to Balloon3DEnv)
+ENV_CONFIG = dict(
+    wind_pattern="altitude_shear",  # east/west wind based on altitude
+)
+
 
 # def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
 #     """
@@ -66,8 +73,9 @@ REWARD_THRESHOLD = 10_000  # stop early on good performance
 #     return df
 
 
-def _make_env(env_id: str, dim: int, seed: int, monitor_file: str) -> Monitor:
-    env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True)
+def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict = None) -> Monitor:
+    cfg = {**ENV_CONFIG, **(config or {})}
+    env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True, config=cfg)
     env = Monitor(env, filename=monitor_file)  # writes train_monitor.csv
     env.reset(seed=seed)
     return env
@@ -99,7 +107,7 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
 
     # Evaluation env (separate Monitor file)
     eval_env = Monitor(
-        gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True),
+        gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True, config=ENV_CONFIG),
         filename=os.path.join(SAVE_PATH, "eval_monitor.csv")
     )
 
@@ -141,15 +149,16 @@ def test(dim: int) -> None:
     device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
 
     # Human-render env for demo
+    test_config = {**ENV_CONFIG, "time_max": 2_000}
     env: gym.Env = Monitor(
-        gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 2_000})
+        gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config=test_config)
     )
 
     # Load model
     model: QRDQN = QRDQN.load(MODEL_PATH, device=device)
 
     # (Optional) inspect Q-values for a single obs
-    env_temp = Balloon3DEnv(dim=1, render_mode=None)
+    env_temp = Balloon3DEnv(dim=dim, render_mode=None, config=ENV_CONFIG)
     obs, _ = env_temp.reset(seed=42)
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)
     with torch.no_grad():

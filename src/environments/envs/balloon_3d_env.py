@@ -296,14 +296,34 @@ class Balloon3DEnv(gym.Env):
 
         self._atmosphere = Atmosphere()
 
-        # random starting position far enough from the goal (~500 m) to avoid trivial episodes
-        while True:
-            # Generate random position and goal using _ranges (appropriate for each dim)
-            pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-            goal = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-            dist = float(np.linalg.norm(pos0 - goal))
-            if dist > 500.0:
-                break
+        # Determine goal based on wind pattern
+        wind_pattern = self.cfg.get("wind_pattern", "sinusoid")
+
+        if wind_pattern == "altitude_shear":
+            # Fixed goal at wind crossover point (center of domain, midpoint altitude)
+            # This allows the agent to station-keep by oscillating altitude
+            if self.dim == 1:
+                goal = np.array([self.z0], dtype=np.float64)  # z midpoint
+            elif self.dim == 2:
+                goal = np.array([0.0, 0.0], dtype=np.float64)  # x,y center
+            else:  # dim == 3
+                z_mid = 0.5 * (self.z_range[0] + self.z_range[1])
+                goal = np.array([0.0, 0.0, z_mid], dtype=np.float64)  # center, at wind crossover
+
+            # Random starting position far enough from the fixed goal
+            while True:
+                pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
+                dist = float(np.linalg.norm(pos0 - goal))
+                if dist > 500.0:
+                    break
+        else:
+            # Random goal - original behavior
+            while True:
+                pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
+                goal = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
+                dist = float(np.linalg.norm(pos0 - goal))
+                if dist > 500.0:
+                    break
 
         self.goal = goal
         self.goal_norm = self._normalise_position(self.goal).astype(np.float32)

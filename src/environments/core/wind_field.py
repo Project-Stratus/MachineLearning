@@ -5,10 +5,12 @@ core.wind_field
 Builds a 3-D wind-velocity field on a regular grid and provides fast
 trilinear interpolation.  Patterns currently supported:
 
-    • "sinusoid"     - original wavy field (2D)
-    • "linear_right" - constant +X wind (2D)
-    • "linear_up"    - constant +Y wind (2D)
-    • "split_fork"   - fan-out pattern (2D)
+    • "sinusoid"       - original wavy field (2D)
+    • "linear_right"   - constant +X wind (2D)
+    • "linear_up"      - constant +Y wind (2D)
+    • "split_fork"     - fan-out pattern (2D)
+    • "altitude_shear" - east/west wind based on altitude (3D)
+                         west wind below midpoint, east wind above
 
 Extend `_build_grid()` to add more patterns.
 """
@@ -148,6 +150,14 @@ class WindField:
             alpha = Xn * Yn
             self._fx_grid = mag * (1.0 - alpha)
             self._fy_grid = mag * alpha * np.sign(Y)
+
+        elif self.pattern == "altitude_shear":
+            # Normalize Z to [0, 1] where 0 = low altitude, 1 = high altitude
+            Zn = (Z - zr[0]) / (zr[1] - zr[0])
+            # Linear shear: -mag at bottom (west), +mag at top (east)
+            # Crossover (zero wind) at midpoint altitude
+            self._fx_grid = mag * (2.0 * Zn - 1.0)
+            self._fy_grid = np.zeros_like(Y)
 
         else:  # "sinusoid" default
             self._fx_grid = (mag * 0.5 * (np.sin(2 * np.pi * X / (xr[1] - xr[0]))

@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+# Add src/ to path so we can import agents and environments
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
 import agents.ppo as ppo
 import agents.qrdqn as qrdqn
 import argparse
