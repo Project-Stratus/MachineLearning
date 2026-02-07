@@ -61,6 +61,7 @@ class WindField:
         self.z_centers = (self.z_edges[:-1] + self.z_edges[1:]) / 2
 
         self._build_grid()  # fills self._fx_grid, self._fy_grid
+        self._sample_buf = np.zeros(3, dtype=np.float32)  # reusable return buffer
 
         self.dx = (x_range[1] - x_range[0]) / self.cells
         self.dy = (y_range[1] - y_range[0]) / self.cells
@@ -117,14 +118,10 @@ class WindField:
             fx = self._fx_grid[ix, iy, iz]
             fy = self._fy_grid[ix, iy, iz]
 
-        # ix = self._to_idx(xi, self.x_range[0], self.inv_dx, self.cells)
-        # iy = self._to_idx(yi, self.y_range[0], self.inv_dy, self.cells)
-        # iz = self._to_idx(zi, self.z_range[0], self.inv_dz, self.cells)
-
-        # # avoid new array allocation on hot path
-        # fx = float(self._fx_grid[ix, iy, iz])
-        # fy = float(self._fy_grid[ix, iy, iz])
-        return np.array([fx, fy, 0.0], dtype=np.float32)
+        self._sample_buf[0] = fx
+        self._sample_buf[1] = fy
+        # _sample_buf[2] stays 0.0 from init
+        return self._sample_buf
 
     # ------------------------------------------------------------------ #
     # internals

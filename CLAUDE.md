@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 Project Stratus is a reinforcement learning framework for training autonomous agents to control high-altitude balloons for station-keeping. Agents learn to adjust balloon altitude through inflation/deflation, using wind currents to maintain position near target locations.
@@ -24,8 +22,8 @@ python tests/check_install.py --build --pip-check  # Smoke test
 ### Training & Running
 ```bash
 python main.py ppo --train --dim 1    # Train PPO in 1D
-python main.py qrdqn --train --dim 2  # Train QR-DQN in 2D
-python main.py ppo --dim 3            # Test PPO in 3D (no --train = inference)
+python main.py dqn --train --dim 2    # Train DQN in 2D
+python main.py qrdqn --dim 3          # Test QR-DQN in 3D (no --train = inference)
 ```
 
 ### Code Quality

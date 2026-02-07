@@ -46,6 +46,8 @@ class PygameRenderer:
         self.window = pygame.display.set_mode(window_size, display=0)
         self.clock = pygame.time.Clock()
         self.fps = 60
+        self.skip_requested = False
+        self.quit_requested = False
 
     # ------------------------------------------------------------------ #
     # public API
@@ -120,9 +122,77 @@ class PygameRenderer:
         canvas.blit(map_surface, (0, 0))
         canvas.blit(alt_surface, (self.left_w, 0))
         self.window.blit(canvas, canvas.get_rect())
+
+        # ------------- "Next (N)" skip button ----------------------------
+        small_font = pygame.font.SysFont(None, 22)
+        btn_w, btn_h = 80, 28
+        btn_x = self.window_w - btn_w - 8
+        btn_y = 8
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        pygame.draw.rect(self.window, (60, 60, 60), btn_rect, border_radius=5)
+        pygame.draw.rect(self.window, (180, 180, 180), btn_rect, width=1, border_radius=5)
+        btn_text = small_font.render("Next (N)", True, (220, 220, 220))
+        self.window.blit(btn_text, (btn_x + (btn_w - btn_text.get_width()) // 2,
+                                     btn_y + (btn_h - btn_text.get_height()) // 2))
+
         pygame.display.update()
-        pygame.event.pump()
+
+        # Process events here (pump would discard them before the test loop sees them)
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                self.quit_requested = True
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_n:
+                self.skip_requested = True
+            elif ev.type == pygame.MOUSEBUTTONDOWN and btn_rect.collidepoint(ev.pos):
+                self.skip_requested = True
+
         self.clock.tick(self.fps)
+
+    # ------------------------------------------------------------------
+    def show_end_screen(self, reason: str, duration: float = 3.0) -> bool:
+        """
+        Freeze the current frame and overlay the termination reason for
+        *duration* seconds.  Returns True if the user pressed N or clicked
+        "Next" to skip ahead early, False otherwise.
+        """
+        font = pygame.font.SysFont(None, 36)
+        small_font = pygame.font.SysFont(None, 24)
+
+        # Semi-transparent overlay
+        overlay = pygame.Surface((self.window_w, self.window_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 140))
+        self.window.blit(overlay, (0, 0))
+
+        # Reason text (centered)
+        text_surf = font.render(reason, True, (255, 255, 255))
+        tx = (self.window_w - text_surf.get_width()) // 2
+        ty = (self.window_h - text_surf.get_height()) // 2 - 20
+        self.window.blit(text_surf, (tx, ty))
+
+        # "Next" button
+        btn_w, btn_h = 100, 36
+        btn_x = (self.window_w - btn_w) // 2
+        btn_y = ty + text_surf.get_height() + 24
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        pygame.draw.rect(self.window, (70, 70, 70), btn_rect, border_radius=6)
+        pygame.draw.rect(self.window, (200, 200, 200), btn_rect, width=1, border_radius=6)
+        btn_text = small_font.render("Next (N)", True, (255, 255, 255))
+        self.window.blit(btn_text, (btn_x + (btn_w - btn_text.get_width()) // 2,
+                                     btn_y + (btn_h - btn_text.get_height()) // 2))
+
+        pygame.display.update()
+
+        start = pygame.time.get_ticks()
+        while (pygame.time.get_ticks() - start) < duration * 1000:
+            for ev in pygame.event.get():
+                if ev.type == pygame.QUIT:
+                    return False
+                if ev.type == pygame.KEYDOWN and ev.key == pygame.K_n:
+                    return True
+                if ev.type == pygame.MOUSEBUTTONDOWN and btn_rect.collidepoint(ev.pos):
+                    return True
+            self.clock.tick(30)
+        return False
 
     # ------------------------------------------------------------------
     def close(self):

@@ -15,7 +15,7 @@ if __name__ == "__main__":
     # Args
     parser = argparse.ArgumentParser(description="Train or Run a PPO/QR-DQN agent on our Loon Environment.")
     parser.add_argument('-t','--train', action='store_true', help='Train the model.')
-    parser.add_argument('-d', '--dim', type=int, default=1, choices=[1,2,3], help='Dimensionality of the environment (1D, 2D or 3D).')
+    parser.add_argument('-d', '--dim', type=int, default=3, choices=[1,2,3], help='Dimensionality of the environment (1D, 2D or 3D).')
     parser.add_argument('-sf', '--save_fig', action='store_true', help='Save training figure to disk (only in train mode).')
     parser.add_argument('model', choices=['ppo', 'qrdqn'], help='Name of agent to load/train.')
     args = parser.parse_args()

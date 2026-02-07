@@ -184,31 +184,47 @@ def test(dim) -> None:
             next_state, reward, terminated, truncated, info = env.step(action_idx)
 
             effect = int(env.unwrapped._action_lut[action_idx])
-            text_action = (Actions(effect).name if effect in Actions._value2member_map_ else "UNKNOWN").upper()
+            act = (Actions(effect).name if effect in Actions._value2member_map_ else "?").upper()[:3]
 
-            components = info.get("reward_components", {})
-            reward_distance = components.get("distance", 0.0)
-            reward_direction = components.get("direction", 0.0)
-            reward_reached = components.get("reached", 0.0)
-            reward_effect = components.get("effect", 0.0)
-            print(f"|| Ep {episode+1} ",
-                  f"|| Step {steps:>6} ",
-                  f"|| Action: {text_action} ",
-                  f"|| Reward: {reward:+.4f} ",
-                  f"|| Components: [Dist.: {reward_distance:+.4f}, ",
-                  f"Dir.: {reward_direction:+.4f}, ",
-                  f"Rea.: {reward_reached:+.4f}, ",
-                  f"Eff.: {reward_effect:+.4f}] ||"
-                   )
+            pos = env.unwrapped._balloon.pos
+            if env.unwrapped.dim == 1:
+                pos_str = f"z={pos[0]:+.1f}"
+            elif env.unwrapped.dim == 2:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f}"
+            else:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f},{pos[2]:+.1f}"
+
+            c = info.get("reward_components", {})
+            print(
+                f"E{episode+1}|S{steps:>5}|A:{act:<3}"
+                f"|Pos:{pos_str}"
+                f"|R:{reward:+.3f}"
+                f"|dst:{c.get('distance',0):+.3f}"
+                f" dir:{c.get('direction',0):+.3f}"
+                f" rea:{c.get('reached',0):+.3f}"
+                f" eff:{c.get('effect',0):+.3f}"
+            )
 
             state = next_state
             game_over = terminated or truncated
 
-            if pygame.event.peek(pygame.QUIT):
-                env.close()
-                return
+            # Check renderer flags (events are processed inside draw())
+            renderer = env.unwrapped.renderer
+            if renderer is not None:
+                if renderer.quit_requested:
+                    env.close()
+                    return
+                if renderer.skip_requested:
+                    renderer.skip_requested = False
+                    game_over = True
 
         t1 = time.time()
         print(f"{steps / (t1 - t0):.2f} steps/second")
+
+        # Show end screen with termination reason
+        reason = info.get("termination_reason", "Episode ended")
+        renderer = env.unwrapped.renderer
+        if renderer is not None:
+            renderer.show_end_screen(reason)
 
     return

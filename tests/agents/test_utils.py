@@ -175,10 +175,12 @@ class TestInfoProgressBarIntegration:
         """InfoProgressBar should work with actual (short) training."""
         pytest.importorskip("stable_baselines3")
 
+        import torch
         from stable_baselines3 import PPO
         from stable_baselines3.common.callbacks import CallbackList
         from environments.envs.balloon_3d_env import Balloon3DEnv
 
+        device = "cpu"  # Force CPU for short test to avoid SB3 MLP-on-GPU warning
         env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 10})
         try:
             callback = InfoProgressBar(
@@ -186,7 +188,7 @@ class TestInfoProgressBarIntegration:
                 postfix={"test": True}
             )
 
-            model = PPO("MlpPolicy", env, verbose=0, n_steps=8, batch_size=4)
+            model = PPO("MlpPolicy", env, verbose=0, n_steps=8, batch_size=4, device=device)
             # Very short training just to verify no errors
             model.learn(total_timesteps=16, callback=callback)
         finally:

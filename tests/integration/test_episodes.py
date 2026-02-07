@@ -251,13 +251,14 @@ class TestRewardConsistency:
         try:
             env.reset(seed=42)
 
-            # Force balloon low and falling
-            env._balloon.pos[0] = 50.0
-            env._balloon.vel[0] = -20.0
+            # Make balloon heavy so gravity overwhelms buoyancy, causing a crash
+            env._balloon.mass = 1000.0
+            env._balloon.pos[0] = 10.0
+            env._balloon.vel[0] = -5.0
 
-            # Deflate until crash
+            # Step until crash
             for _ in range(100):
-                _, reward, terminated, _, _ = env.step(0)
+                _, reward, terminated, _, _ = env.step(1)  # do nothing
                 if terminated:
                     assert reward == -5.0, "Crash should give punishment reward"
                     break

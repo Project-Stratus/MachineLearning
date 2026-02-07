@@ -26,13 +26,13 @@ TRAIN_CFG = dict(
     gamma = 0.99,
     buffer_size = 1_000_000,
     learning_starts = 50_000,
-    train_freq = 32,                  # steps between gradient steps
-    gradient_steps = 32,              # steps per env step collected (classic DQN setup is 1)
+    train_freq = 4,                   # collect 4 env steps between gradient updates
+    gradient_steps = 1,               # 1 gradient step per update (standard DQN ratio)
     target_update_interval = 20_000,  # soft: use tau if preferred; here: periodic hard update
     batch_size = 256,
     exploration_initial_eps = 1.0,
     exploration_final_eps = 0.05,
-    exploration_fraction = 0.2,      # portion of training over which epsilon decays
+    exploration_fraction = 0.5,      # portion of training over which epsilon decays
     verbose = 0,
 )
 
@@ -43,7 +43,7 @@ POLICY_KWARGS = dict(
     n_quantiles=25,                # Loon-style head size is 51 quantiles/action
 )
 
-TOTAL_TIMESTEPS = 1_500_000
+TOTAL_TIMESTEPS = 10_000_000
 EVAL_FREQ = 1_000_000
 REWARD_THRESHOLD = 10_000  # stop early on good performance
 
@@ -162,8 +162,9 @@ def test(dim: int) -> None:
     obs, _ = env_temp.reset(seed=42)
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)
     with torch.no_grad():
-        q_values = model.q_net(obs_tensor)
-        print("Q-values:", q_values.detach().cpu().numpy())   # shape: [1, n_actions]
+        quantiles = model.quantile_net(obs_tensor)  # shape: [1, n_quantiles, n_actions]
+        q_values = quantiles.mean(dim=1)  # mean across quantiles -> [1, n_actions]
+        print("Q-values:", q_values.cpu().numpy())
 
     # Roll a few episodes
     for episode in range(10):
@@ -177,28 +178,48 @@ def test(dim: int) -> None:
             action_idx, _ = model.predict(state, deterministic=True)
             next_state, reward, terminated, truncated, info = env.step(action_idx)
 
-            # Pretty print (mirrors your PPO tester)
             effect = int(env.unwrapped._action_lut[action_idx])
-            text_action = (Actions(effect).name if effect in Actions._value2member_map_ else "UNKNOWN").upper()
+            act = (Actions(effect).name if effect in Actions._value2member_map_ else "?").upper()[:3]
 
-            comps = info.get("reward_components", {})
+            pos = env.unwrapped._balloon.pos
+            if env.unwrapped.dim == 1:
+                pos_str = f"z={pos[0]:+.1f}"
+            elif env.unwrapped.dim == 2:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f}"
+            else:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f},{pos[2]:+.1f}"
+
+            c = info.get("reward_components", {})
             print(
-                f"|| Ep {episode+1} || Step {steps:>6} || Action: {text_action} "
-                f"|| Reward: {reward:+.4f} || Components: "
-                f"[Dist.: {comps.get('distance', 0.0):+.4f}, "
-                f"Dir.: {comps.get('direction', 0.0):+.4f}, "
-                f"Rea.: {comps.get('reached', 0.0):+.4f}, "
-                f"Eff.: {comps.get('effect', 0.0):+.4f}] ||"
+                f"E{episode+1}|S{steps:>5}|A:{act:<3}"
+                f"|Pos:{pos_str}"
+                f"|R:{reward:+.3f}"
+                f"|dst:{c.get('distance',0):+.3f}"
+                f" dir:{c.get('direction',0):+.3f}"
+                f" rea:{c.get('reached',0):+.3f}"
+                f" eff:{c.get('effect',0):+.3f}"
             )
 
             state = next_state
             done = terminated or truncated
 
-            if pygame.event.peek(pygame.QUIT):
-                env.close()
-                return
+            # Check renderer flags (events are processed inside draw())
+            renderer = env.unwrapped.renderer
+            if renderer is not None:
+                if renderer.quit_requested:
+                    env.close()
+                    return
+                if renderer.skip_requested:
+                    renderer.skip_requested = False
+                    done = True
 
         t1 = time.time()
         print(f"{steps / (t1 - t0):.2f} steps/second")
+
+        # Show end screen with termination reason
+        reason = info.get("termination_reason", "Episode ended")
+        renderer = env.unwrapped.renderer
+        if renderer is not None:
+            renderer.show_end_screen(reason)
 
     env.close()

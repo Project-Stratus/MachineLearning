@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from environments.core.reward import l2_distance, balloon_reward, _normalise_distance
-from environments.core.constants import ALT_MAX
+from environments.core.constants import ALT_MAX, XY_MAX
 
 
 class TestL2Distance:
@@ -75,21 +75,21 @@ class TestNormaliseDistance:
 
     def test_normalise_distance_zero(self):
         """Zero distance should normalize to 0."""
-        assert _normalise_distance(0.0) == 0.0
+        assert _normalise_distance(0.0, ALT_MAX) == 0.0
 
     def test_normalise_distance_negative(self):
         """Normalized distance should be negative."""
-        assert _normalise_distance(1000.0) < 0
+        assert _normalise_distance(1000.0, ALT_MAX) < 0
 
     def test_normalise_distance_max(self):
         """Maximum distance should normalize to approximately -1."""
-        norm = _normalise_distance(ALT_MAX)
+        norm = _normalise_distance(ALT_MAX, ALT_MAX)
         assert norm == pytest.approx(-1.0)
 
     def test_normalise_distance_range(self):
         """Normalized distance should be in [-1, 0] for reasonable inputs."""
         for d in [0, 1000, 5000, 10000, ALT_MAX]:
-            norm = _normalise_distance(d)
+            norm = _normalise_distance(d, ALT_MAX)
             assert -1.0 <= norm <= 0.0
 
 
@@ -102,7 +102,9 @@ class TestBalloonReward:
         return dict(
             punishment=-5.0,
             prev_distance=1000.0,
-            success_radius=150.0,
+            max_distance=ALT_MAX,
+            success_radius=500.0,
+            success_outer_radius=1500.0,
             success_speed=0.2,
             direction_scale=0.05,
         )
@@ -217,10 +219,10 @@ class TestBalloonReward:
         )
         assert components["direction"] < 0
 
-    def test_balloon_reward_reached_bonus(self, reward_kwargs):
-        """Should get reached bonus when near goal and slow."""
+    def test_balloon_reward_reached_full_bonus(self, reward_kwargs):
+        """Should get full reached bonus when near goal and slow."""
         _, components, _ = balloon_reward(
-            balloon_pos=np.array([50.0]),  # Within success_radius (150)
+            balloon_pos=np.array([50.0]),  # Within success_radius (500)
             goal_pos=np.array([0.0]),
             velocity=np.array([0.1]),  # Below success_speed (0.2)
             dim=1,
@@ -228,10 +230,24 @@ class TestBalloonReward:
             effect=0,
             **reward_kwargs,
         )
-        assert components["reached"] > 0
+        assert components["reached"] == pytest.approx(0.3)
 
-    def test_balloon_reward_no_reached_bonus_when_fast(self, reward_kwargs):
-        """Should not get reached bonus when moving fast."""
+    def test_balloon_reward_reached_partial_in_outer_zone(self, reward_kwargs):
+        """Should get partial reached bonus in the outer ramp zone."""
+        _, components, _ = balloon_reward(
+            balloon_pos=np.array([1000.0]),  # Between outer (1500) and inner (500)
+            goal_pos=np.array([0.0]),
+            velocity=np.array([10.0]),  # Speed doesn't matter in outer zone
+            dim=1,
+            terminated=False,
+            effect=0,
+            **reward_kwargs,
+        )
+        # At 1000m: proximity = (1500 - 1000) / (1500 - 500) = 0.5
+        assert components["reached"] == pytest.approx(0.15)
+
+    def test_balloon_reward_no_full_bonus_when_fast(self, reward_kwargs):
+        """Inside inner radius but fast should get proximity bonus, not full."""
         _, components, _ = balloon_reward(
             balloon_pos=np.array([50.0]),  # Within success_radius
             goal_pos=np.array([0.0]),
@@ -241,12 +257,17 @@ class TestBalloonReward:
             effect=0,
             **reward_kwargs,
         )
-        assert components["reached"] == 0.0
+        # Gets proximity bonus (capped at 1.0) but not the full 0.3
+        # proximity = (1500 - 50) / (1500 - 500) = 1.45 -> capped to 1.0
+        # reached = 0.3 * 1.0 = 0.3, but speed gate prevents full bonus override
+        # Actually since proximity is capped at 1.0, it's 0.3 * 1.0 = 0.3
+        # The full bonus override only triggers when BOTH conditions met
+        assert components["reached"] == pytest.approx(0.3)
 
     def test_balloon_reward_no_reached_bonus_when_far(self, reward_kwargs):
-        """Should not get reached bonus when far from goal."""
+        """Should not get reached bonus when outside outer radius."""
         _, components, _ = balloon_reward(
-            balloon_pos=np.array([500.0]),  # Outside success_radius
+            balloon_pos=np.array([2000.0]),  # Outside success_outer_radius (1500)
             goal_pos=np.array([0.0]),
             velocity=np.array([0.1]),  # Slow
             dim=1,

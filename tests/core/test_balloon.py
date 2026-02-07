@@ -5,7 +5,7 @@ import pytest
 
 from environments.core.balloon import Balloon
 from environments.core.atmosphere import Atmosphere
-from environments.core.constants import G
+from environments.core.constants import G, ALT_DEFAULT
 
 
 class TestBalloonInitialization:
@@ -16,7 +16,7 @@ class TestBalloonInitialization:
         balloon = Balloon(atmosphere=atmosphere)
         assert balloon.dim == 1
         assert balloon.mass == 2.0
-        assert balloon.altitude == 25_000.0  # default starting altitude
+        assert balloon.altitude == ALT_DEFAULT  # default starting altitude
         assert balloon.velocity == 0.0
         assert balloon.t == 0.0
 
