@@ -23,7 +23,7 @@ SEED = 42
 # QR-DQN training config (strong defaults; adjust to taste)
 TRAIN_CFG = dict(
     learning_rate = 3e-4,
-    gamma = 0.99,
+    gamma = 0.995,
     buffer_size = 1_000_000,
     learning_starts = 50_000,
     train_freq = 4,                   # collect 4 env steps between gradient updates
@@ -31,16 +31,16 @@ TRAIN_CFG = dict(
     target_update_interval = 20_000,  # soft: use tau if preferred; here: periodic hard update
     batch_size = 256,
     exploration_initial_eps = 1.0,
-    exploration_final_eps = 0.05,
-    exploration_fraction = 0.5,      # portion of training over which epsilon decays
+    exploration_final_eps = 0.01,
+    exploration_fraction = 0.3,      # portion of training over which epsilon decays
     verbose = 0,
 )
 
-# Policy network; start modest. If you want Loon-style capacity, set [600]*7.
+# Policy network; scaling toward Loon-style [600]*7 as wind fields get harder.
 POLICY_KWARGS = dict(
-    net_arch=[256, 256],  # try [600, 600, 600, 600, 600, 600, 600] to mimic Loon
+    net_arch=[512, 512, 256],      # capacity for 2D shear; next step: [600]*5+ for realistic winds
     activation_fn=torch.nn.ReLU,
-    n_quantiles=25,                # Loon-style head size is 51 quantiles/action
+    n_quantiles=51,                # Loon-style quantile head
 )
 
 TOTAL_TIMESTEPS = 10_000_000
@@ -49,7 +49,7 @@ REWARD_THRESHOLD = 10_000  # stop early on good performance
 
 # Environment config overrides (passed to Balloon3DEnv)
 ENV_CONFIG = dict(
-    wind_pattern="altitude_shear",  # east/west wind based on altitude
+    wind_pattern="altitude_shear_2d",  # wind direction rotates with altitude (N→E→S→W)
 )
 
 

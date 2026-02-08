@@ -9,8 +9,10 @@ trilinear interpolation.  Patterns currently supported:
     • "linear_right"   - constant +X wind (2D)
     • "linear_up"      - constant +Y wind (2D)
     • "split_fork"     - fan-out pattern (2D)
-    • "altitude_shear" - east/west wind based on altitude (3D)
-                         west wind below midpoint, east wind above
+    • "altitude_shear"    - east/west wind based on altitude (3D)
+                           west wind below midpoint, east wind above
+    • "altitude_shear_2d" - wind direction rotates with altitude (3D)
+                           N→E→S→W over the full altitude range
 
 Extend `_build_grid()` to add more patterns.
 """
@@ -155,6 +157,14 @@ class WindField:
             # Crossover (zero wind) at midpoint altitude
             self._fx_grid = mag * (2.0 * Zn - 1.0)
             self._fy_grid = np.zeros_like(Y)
+
+        elif self.pattern == "altitude_shear_2d":
+            # Wind direction rotates smoothly with altitude:
+            # bottom=north, quarter=east, mid=south, three-quarter=west
+            Zn = (Z - zr[0]) / (zr[1] - zr[0])
+            theta = 2.0 * np.pi * Zn
+            self._fx_grid = mag * np.sin(theta)
+            self._fy_grid = mag * np.cos(theta)
 
         else:  # "sinusoid" default
             self._fx_grid = (mag * 0.5 * (np.sin(2 * np.pi * X / (xr[1] - xr[0]))

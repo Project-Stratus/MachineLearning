@@ -115,7 +115,7 @@ class Balloon3DEnv(gym.Env):
         wind_cells=20,           # grid for wind visualisation
         inflate_rate=0.01,       # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
-        wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork"
+        wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
     )
 
     def __init__(self,
