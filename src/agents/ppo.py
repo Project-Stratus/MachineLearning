@@ -26,7 +26,6 @@ ENVIRONMENT_NAME = "environments/Balloon3D-v0"
 SAVE_PATH = "./src/models/ppo_model/"
 MODEL_PATH = SAVE_PATH + "ppo"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
-USE_GPU = False
 SEED = 42
 
 TRAIN_CFG = dict(
@@ -60,13 +59,13 @@ def make_env_fn(dim: int) -> Callable[[], gym.Env]:
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
-def train(dim, verbose=0, render_freq=None) -> None:
+def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> None:
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
 
     # Use a GPU if possible
-    device = torch.device("cuda") if USE_GPU and torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if use_gpu and torch.cuda.is_available() else torch.device("cpu")
 
     def make_env(env_id, seed, dim):
         # Define at module level so it’s picklable for SubprocVecEnv
@@ -131,11 +130,14 @@ def train(dim, verbose=0, render_freq=None) -> None:
         render=False
     )
 
-    tqdm_callback = InfoProgressBar(
-        description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
-        postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
-    )
-    callback = CallbackList([tqdm_callback, eval_callback])
+    callbacks = [eval_callback]
+    if not hpc:
+        tqdm_callback = InfoProgressBar(
+            description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
+            postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
+        )
+        callbacks.insert(0, tqdm_callback)
+    callback = CallbackList(callbacks)
 
     # Train the model
     model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"PPO_run_dim{dim}")
@@ -148,13 +150,13 @@ def train(dim, verbose=0, render_freq=None) -> None:
 
 
 # Load the final model from the previous training run, and dipslay it playing the environment
-def test(dim) -> None:
+def test(dim, use_gpu: bool = False) -> None:
     from environments.envs.balloon_3d_env import Actions
 
     env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 2_000}))
 
     # Use a GPU if possible
-    device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
+    device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
     # Load the model
     model = PPO.load(MODEL_PATH, device=device)

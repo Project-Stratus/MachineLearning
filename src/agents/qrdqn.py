@@ -17,7 +17,6 @@ ENVIRONMENT_NAME = "environments/Balloon3D-v0"
 SAVE_PATH = "./src/models/qr_dqn_model/"
 MODEL_PATH = os.path.join(SAVE_PATH, "qr_dqn")
 VIDEO_PATH = "./figs/qr_dqn_figs/performance_video"  # (unused here but kept for parity)
-USE_GPU = False
 SEED = 42
 
 # QR-DQN training config (strong defaults; adjust to taste)
@@ -81,7 +80,7 @@ def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict 
     return env
 
 
-def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
+def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> pd.DataFrame:
     """
     Train QR-DQN on the same environment. Returns a DataFrame of episode returns/lengths.
     """
@@ -89,7 +88,7 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
 
-    device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
+    device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
     os.makedirs(SAVE_PATH, exist_ok=True)
     monitor_file = os.path.join(SAVE_PATH, "train_monitor")
@@ -123,11 +122,14 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
         render=False
     )
 
-    tqdm_cb = InfoProgressBar(
-        description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | device={device} |",
-        postfix=dict(gamma=TRAIN_CFG["gamma"])
-    )
-    callback = CallbackList([tqdm_cb, eval_cb])
+    callbacks = [eval_cb]
+    if not hpc:
+        tqdm_cb = InfoProgressBar(
+            description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | device={device} |",
+            postfix=dict(gamma=TRAIN_CFG["gamma"])
+        )
+        callbacks.insert(0, tqdm_cb)
+    callback = CallbackList(callbacks)
 
     model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"QRDQN_run_dim{dim}")
     model.save(MODEL_PATH)
@@ -137,7 +139,7 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
     return _gather_monitor_csvs(SAVE_PATH)
 
 
-def test(dim: int) -> None:
+def test(dim: int, use_gpu: bool = False) -> None:
     """
     Load the saved QR-DQN and run a few episodes with greedy actions.
     Mirrors your PPO test loop (minus policy distribution prints).
@@ -146,7 +148,7 @@ def test(dim: int) -> None:
     from environments.envs.balloon_3d_env import Actions  # your enum
     from environments.envs.balloon_3d_env import Balloon3DEnv
 
-    device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
+    device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
     # Human-render env for demo
     test_config = {**ENV_CONFIG, "time_max": 2_000}
