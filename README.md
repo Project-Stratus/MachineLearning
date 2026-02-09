@@ -10,7 +10,7 @@ Station-keeping high-altitude balloons have several key advantages over drones, 
 - Large-scale wireless connectivity to remote and rural areas
 - Rapid-response imagery and communications for natural disaster sites
 - Short/medium-range weather forecasting from the stratosphere
-- They're cool
+- They're cool :)
 
 ## How it works
 The agent interacts with a Gym-compatible 3D balloon environment at each timestep. It observes its position, velocity, altitude, ambient pressure, wind vector, and distance to a target location — all normalised to [0, 1]. It then chooses one of three discrete actions: **inflate**, **deflate**, or **do nothing**, which adjusts the balloon's buoyancy and therefore its altitude. By changing altitude, the agent moves into different wind layers and exploits wind currents to navigate toward the target.
