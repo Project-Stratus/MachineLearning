@@ -74,3 +74,17 @@ packages = [
   "src/models",
   # REMINDER: Do not list src and ensure src/__init__.py does NOT exist
   ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning:pkg_resources",
+    "ignore::DeprecationWarning:pygame.pkgdata",
+    "ignore::tqdm.TqdmExperimentalWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]

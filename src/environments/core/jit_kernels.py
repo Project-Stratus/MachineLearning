@@ -37,7 +37,7 @@ def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
                        G: float, CD: float, AREA: float,
                        rho_air: float, volume: float,
                        external_force: np.ndarray, control_force: np.ndarray,
-                       n_dim: int) -> None:
+                       n_dim: int, vel_max: float) -> None:
     """
     In-place integration for 1D/2D/3D.
     Uses the last axis (index n_dim-1) as vertical for buoyancy/weight.
@@ -49,7 +49,7 @@ def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
         vi = vel[i]
         speed2 += vi * vi
 
-    have_speed = speed2 > 1e-16
+    have_speed = speed2 > 1e-24  # SPEED_EPS**2 (1e-12 squared)
     inv_speed = 1.0 / math.sqrt(speed2) if have_speed else 0.0
     f_mag = 0.5 * CD * AREA * rho_air * speed2 if have_speed else 0.0
 
@@ -66,10 +66,10 @@ def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
         a_i = f_i / mass
         # vel update + clip
         vi = vel[i] + a_i * dt
-        if vi > 200.0:
-            vi = 200.0
-        elif vi < -200.0:
-            vi = -200.0
+        if vi > vel_max:
+            vi = vel_max
+        elif vi < -vel_max:
+            vi = -vel_max
         vel[i] = vi
         # pos update
         pos[i] += vi * dt

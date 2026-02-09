@@ -9,12 +9,9 @@ from __future__ import annotations
 import math
 import numpy as np
 
-from environments.core.constants import ALT_MAX
-
-
-def _normalise_distance(distance: float) -> float:
+def _normalise_distance(distance: float, max_distance: float) -> float:
     """Return a distance scaled to [-1, 0], clamped to avoid division by zero."""
-    normaliser = max(ALT_MAX, 1.0)
+    normaliser = max(max_distance, 1.0)
     return -float(distance / normaliser)
 
 
@@ -24,17 +21,21 @@ def _normalise_distance(distance: float) -> float:
 def l2_distance(balloon_pos: np.ndarray, goal_pos: np.ndarray, dim: int) -> float:
     """
     Return Euclidean distance in the *active* dimensions:
-        dim=1 → |z - z_goal|
+        dim=1 → |z - z_goal|  (balloon uses last index for altitude)
         dim=2 → sqrt((x-xg)^2 + (y-yg)^2)
         dim=3 → full 3-D norm
     """
     if dim == 1:
-        return abs(balloon_pos[-1] - goal_pos[0])
+        return abs(float(balloon_pos[-1]) - float(goal_pos[0]))
     elif dim == 2:
-        return math.hypot(balloon_pos[0] - goal_pos[0],
-                          balloon_pos[1] - goal_pos[1])
-    else:  # dim == 3
-        return float(np.linalg.norm(balloon_pos - goal_pos))
+        dx = float(balloon_pos[0]) - float(goal_pos[0])
+        dy = float(balloon_pos[1]) - float(goal_pos[1])
+        return math.sqrt(dx * dx + dy * dy)
+    else:
+        dx = float(balloon_pos[0]) - float(goal_pos[0])
+        dy = float(balloon_pos[1]) - float(goal_pos[1])
+        dz = float(balloon_pos[2]) - float(goal_pos[2])
+        return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 # ------------------------------------------------------------------ #
@@ -46,13 +47,14 @@ def distance_reward(
     dim: int,
     terminated: bool,
     punishment: float,
+    max_distance: float,
 ) -> float:
     """Negative normalised distance to goal with a crash punishment."""
     if terminated:
         return punishment
 
     distance = l2_distance(balloon_pos, goal_pos, dim)
-    return _normalise_distance(distance)
+    return _normalise_distance(distance, max_distance)
 
 
 def balloon_reward(
@@ -65,7 +67,9 @@ def balloon_reward(
     effect: int,
     punishment: float,
     prev_distance: float,
-    success_radius: float = 150.0,      # radius (m)
+    max_distance: float,
+    success_radius: float = 500.0,        # inner radius for full bonus (m)
+    success_outer_radius: float = 1500.0,  # outer radius where ramp begins (m)
     success_speed: float = 0.2,
     direction_scale: float = 0.05,
 ) -> tuple[float, dict[str, float], float]:
@@ -79,36 +83,44 @@ def balloon_reward(
 
     if terminated:
         total = punishment
-        components = dict(distance=punishment, direction=0.0, reached=0.0)
+        components = dict(distance=punishment, direction=0.0, reached=0.0, effect=0.0)
         return total, components, distance
 
     # DISTANCE reward
     # Normalised distance to goal, in [-1, 0]
-    distance_component = _normalise_distance(distance)
+    distance_component = _normalise_distance(distance, max_distance)
 
     # DIRECTION reward
     # Positive when distance is shrinking, negative when growing
     # Scaled to [-1, 1] based on success_radius
-    distance_delta = float(prev_distance - distance)
+    distance_delta = prev_distance - distance
     if success_radius <= 0.0:
         scaled_delta = 0.0
     else:
-        scaled_delta = np.clip(distance_delta / success_radius, -1.0, 1.0)
+        scaled_delta = distance_delta / success_radius
+        if scaled_delta > 1.0:
+            scaled_delta = 1.0
+        elif scaled_delta < -1.0:
+            scaled_delta = -1.0
     direction_component = direction_scale * scaled_delta
 
     # REACHED reward
-    # Bonus when near the target and moving slowly
-    speed = float(np.linalg.norm(velocity[:dim]))
-    reached = float(distance < success_radius and speed < success_speed)
-    reached_component = 0.3 * reached
+    # Graduated bonus: linear ramp from success_outer_radius to
+    # success_radius, full bonus inside success_radius when slow.
+    speed2 = 0.0
+    for i in range(dim):
+        v = float(velocity[i])
+        speed2 += v * v
+    reached_component = 0.0
+    if distance < success_outer_radius:
+        proximity = (success_outer_radius - distance) / (success_outer_radius - success_radius)
+        if proximity > 1.0:
+            proximity = 1.0
+        reached_component = 0.3 * proximity
+        # Extra: full bonus only when inside inner radius AND moving slowly
+        if distance < success_radius and speed2 < success_speed * success_speed:
+            reached_component = 0.3
 
-    # DO NOTHING reward
-    # Small bonus for taking no action (effect=0)
-    # Likely to be replaced by some sort of 'energy' measure
-    # if effect == 0:
-    #     effect_component = 0.001
-    # else:
-    #     effect_component = 0.0
     effect_component = 0.0
 
     total = distance_component + direction_component + reached_component + effect_component

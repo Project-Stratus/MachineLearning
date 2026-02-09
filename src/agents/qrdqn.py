@@ -1,52 +1,55 @@
 # qr_dqn_runner.py
 import os
-import glob
 import time
-import gymnasium as gym
-import torch
-import pandas as pd
-from typing import Callable
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
-from sb3_contrib import QRDQN
-from tqdm.auto import tqdm
 
-from src.agents.utils import _gather_monitor_csvs
+import gymnasium as gym
+import pandas as pd
+import torch
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, CallbackList
+from sb3_contrib import QRDQN
+
+import environments  # registers the Balloon3D-v0 environment
+from agents.utils import _gather_monitor_csvs, InfoProgressBar
 
 # ---- Config ----
 ENVIRONMENT_NAME = "environments/Balloon3D-v0"
 SAVE_PATH = "./src/models/qr_dqn_model/"
 MODEL_PATH = os.path.join(SAVE_PATH, "qr_dqn")
 VIDEO_PATH = "./figs/qr_dqn_figs/performance_video"  # (unused here but kept for parity)
-USE_GPU = False
 SEED = 42
 
 # QR-DQN training config (strong defaults; adjust to taste)
 TRAIN_CFG = dict(
     learning_rate = 3e-4,
-    gamma = 0.99,
+    gamma = 0.995,
     buffer_size = 1_000_000,
     learning_starts = 50_000,
-    train_freq = 32,                  # steps between gradient steps
-    gradient_steps = 32,              # steps per env step collected (classic DQN setup is 1)
+    train_freq = 4,                   # collect 4 env steps between gradient updates
+    gradient_steps = 1,               # 1 gradient step per update (standard DQN ratio)
     target_update_interval = 20_000,  # soft: use tau if preferred; here: periodic hard update
     batch_size = 256,
     exploration_initial_eps = 1.0,
-    exploration_final_eps = 0.05,
-    exploration_fraction = 0.2,      # portion of training over which epsilon decays
+    exploration_final_eps = 0.01,
+    exploration_fraction = 0.3,      # portion of training over which epsilon decays
     verbose = 0,
 )
 
-# Policy network; start modest. If you want Loon-style capacity, set [600]*7.
+# Policy network; scaling toward Loon-style [600]*7 as wind fields get harder.
 POLICY_KWARGS = dict(
-    net_arch=[256, 256],  # try [600, 600, 600, 600, 600, 600, 600] to mimic Loon
+    net_arch=[512, 512, 256],      # capacity for 2D shear; next step: [600]*5+ for realistic winds
     activation_fn=torch.nn.ReLU,
-    n_quantiles=25,                # Loon-style head size is 51 quantiles/action
+    n_quantiles=51,                # Loon-style quantile head
 )
 
-TOTAL_TIMESTEPS = 1_500_000
+TOTAL_TIMESTEPS = 10_000_000
 EVAL_FREQ = 1_000_000
 REWARD_THRESHOLD = 10_000  # stop early on good performance
+
+# Environment config overrides (passed to Balloon3DEnv)
+ENV_CONFIG = dict(
+    wind_pattern="altitude_shear_2d",  # wind direction rotates with altitude (N→E→S→W)
+)
 
 
 # def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
@@ -69,14 +72,15 @@ REWARD_THRESHOLD = 10_000  # stop early on good performance
 #     return df
 
 
-def _make_env(env_id: str, dim: int, seed: int, monitor_file: str) -> Monitor:
-    env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True)
+def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict = None) -> Monitor:
+    cfg = {**ENV_CONFIG, **(config or {})}
+    env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True, config=cfg)
     env = Monitor(env, filename=monitor_file)  # writes train_monitor.csv
     env.reset(seed=seed)
     return env
 
 
-def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
+def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> pd.DataFrame:
     """
     Train QR-DQN on the same environment. Returns a DataFrame of episode returns/lengths.
     """
@@ -84,7 +88,7 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
 
-    device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
+    device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
     os.makedirs(SAVE_PATH, exist_ok=True)
     monitor_file = os.path.join(SAVE_PATH, "train_monitor")
@@ -102,34 +106,11 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
 
     # Evaluation env (separate Monitor file)
     eval_env = Monitor(
-        gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True),
+        gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True, config=ENV_CONFIG),
         filename=os.path.join(SAVE_PATH, "eval_monitor.csv")
     )
 
     stop_cb = StopTrainingOnRewardThreshold(reward_threshold=REWARD_THRESHOLD, verbose=1)
-
-    class InfoProgressBar(ProgressBarCallback):
-        def __init__(self, description: str, postfix: dict | None = None):
-            super().__init__()
-            self._description = description
-            self._postfix = postfix or {}
-
-        def _resolve_bar(self):
-            return getattr(self, "progress_bar", None) or getattr(self, "pbar", None)
-
-        def _on_training_start(self) -> None:
-            super()._on_training_start()
-            bar = self._resolve_bar()
-            if bar is not None:
-                bar.set_description_str(self._description)
-                if self._postfix:
-                    bar.set_postfix(self._postfix, refresh=False)
-
-        def _on_step(self) -> bool:
-            bar = self._resolve_bar()
-            if bar is not None and self._postfix:
-                bar.set_postfix(self._postfix, refresh=False)
-            return super()._on_step()
 
     eval_cb = EvalCallback(
         eval_env,
@@ -141,11 +122,14 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
         render=False
     )
 
-    tqdm_cb = InfoProgressBar(
-        description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | device={device} |",
-        postfix=dict(gamma=TRAIN_CFG["gamma"])
-    )
-    callback = CallbackList([tqdm_cb, eval_cb])
+    callbacks = [eval_cb]
+    if not hpc:
+        tqdm_cb = InfoProgressBar(
+            description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | device={device} |",
+            postfix=dict(gamma=TRAIN_CFG["gamma"])
+        )
+        callbacks.insert(0, tqdm_cb)
+    callback = CallbackList(callbacks)
 
     model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"QRDQN_run_dim{dim}")
     model.save(MODEL_PATH)
@@ -155,7 +139,7 @@ def train(dim: int, verbose: int = 0, render_freq=None) -> pd.DataFrame:
     return _gather_monitor_csvs(SAVE_PATH)
 
 
-def test(dim: int) -> None:
+def test(dim: int, use_gpu: bool = False) -> None:
     """
     Load the saved QR-DQN and run a few episodes with greedy actions.
     Mirrors your PPO test loop (minus policy distribution prints).
@@ -164,23 +148,25 @@ def test(dim: int) -> None:
     from environments.envs.balloon_3d_env import Actions  # your enum
     from environments.envs.balloon_3d_env import Balloon3DEnv
 
-    device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
+    device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
     # Human-render env for demo
+    test_config = {**ENV_CONFIG, "time_max": 2_000}
     env: gym.Env = Monitor(
-        gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 2_000})
+        gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config=test_config)
     )
 
     # Load model
     model: QRDQN = QRDQN.load(MODEL_PATH, device=device)
 
     # (Optional) inspect Q-values for a single obs
-    env_temp = Balloon3DEnv(dim=1, render_mode=None)
+    env_temp = Balloon3DEnv(dim=dim, render_mode=None, config=ENV_CONFIG)
     obs, _ = env_temp.reset(seed=42)
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)
     with torch.no_grad():
-        q_values = model.q_net(obs_tensor)
-        print("Q-values:", q_values.detach().cpu().numpy())   # shape: [1, n_actions]
+        quantiles = model.quantile_net(obs_tensor)  # shape: [1, n_quantiles, n_actions]
+        q_values = quantiles.mean(dim=1)  # mean across quantiles -> [1, n_actions]
+        print("Q-values:", q_values.cpu().numpy())
 
     # Roll a few episodes
     for episode in range(10):
@@ -194,28 +180,48 @@ def test(dim: int) -> None:
             action_idx, _ = model.predict(state, deterministic=True)
             next_state, reward, terminated, truncated, info = env.step(action_idx)
 
-            # Pretty print (mirrors your PPO tester)
             effect = int(env.unwrapped._action_lut[action_idx])
-            text_action = (Actions(effect).name if effect in Actions._value2member_map_ else "UNKNOWN").upper()
+            act = (Actions(effect).name if effect in Actions._value2member_map_ else "?").upper()[:3]
 
-            comps = info.get("reward_components", {})
+            pos = env.unwrapped._balloon.pos
+            if env.unwrapped.dim == 1:
+                pos_str = f"z={pos[0]:+.1f}"
+            elif env.unwrapped.dim == 2:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f}"
+            else:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f},{pos[2]:+.1f}"
+
+            c = info.get("reward_components", {})
             print(
-                f"|| Ep {episode+1} || Step {steps:>6} || Action: {text_action} "
-                f"|| Reward: {reward:+.4f} || Components: "
-                f"[Dist.: {comps.get('distance', 0.0):+.4f}, "
-                f"Dir.: {comps.get('direction', 0.0):+.4f}, "
-                f"Rea.: {comps.get('reached', 0.0):+.4f}, "
-                f"Eff.: {comps.get('effect', 0.0):+.4f}] ||"
+                f"E{episode+1}|S{steps:>5}|A:{act:<3}"
+                f"|Pos:{pos_str}"
+                f"|R:{reward:+.3f}"
+                f"|dst:{c.get('distance',0):+.3f}"
+                f" dir:{c.get('direction',0):+.3f}"
+                f" rea:{c.get('reached',0):+.3f}"
+                f" eff:{c.get('effect',0):+.3f}"
             )
 
             state = next_state
             done = terminated or truncated
 
-            if pygame.event.peek(pygame.QUIT):
-                env.close()
-                return
+            # Check renderer flags (events are processed inside draw())
+            renderer = env.unwrapped.renderer
+            if renderer is not None:
+                if renderer.quit_requested:
+                    env.close()
+                    return
+                if renderer.skip_requested:
+                    renderer.skip_requested = False
+                    done = True
 
         t1 = time.time()
         print(f"{steps / (t1 - t0):.2f} steps/second")
+
+        # Show end screen with termination reason
+        reason = info.get("termination_reason", "Episode ended")
+        renderer = env.unwrapped.renderer
+        if renderer is not None:
+            renderer.show_end_screen(reason)
 
     env.close()

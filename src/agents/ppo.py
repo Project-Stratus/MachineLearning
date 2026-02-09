@@ -1,20 +1,17 @@
-import sys
-import gymnasium as gym
 import os
-import torch
-import glob
-import pandas as pd
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, ProgressBarCallback, CallbackList
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
-from stable_baselines3.common.monitor import Monitor
-import pygame
+import time
 import multiprocessing as mp
 from typing import Callable
-import time
-from tqdm.auto import tqdm
 
-from src.agents.utils import _gather_monitor_csvs
+import gymnasium as gym
+import pygame
+import torch
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, CallbackList
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
+from stable_baselines3.common.monitor import Monitor
+
+from agents.utils import _gather_monitor_csvs, InfoProgressBar
 """
 Time param cheat sheet:
 - BATCH_SIZE:   Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
@@ -29,7 +26,6 @@ ENVIRONMENT_NAME = "environments/Balloon3D-v0"
 SAVE_PATH = "./src/models/ppo_model/"
 MODEL_PATH = SAVE_PATH + "ppo"
 VIDEO_PATH = "./figs/ppo_figs/performance_video"
-USE_GPU = False
 SEED = 42
 
 TRAIN_CFG = dict(
@@ -63,13 +59,13 @@ def make_env_fn(dim: int) -> Callable[[], gym.Env]:
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
-def train(dim, verbose=0, render_freq=None) -> None:
+def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> None:
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
 
     # Use a GPU if possible
-    device = torch.device("cuda") if USE_GPU and torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if use_gpu and torch.cuda.is_available() else torch.device("cpu")
 
     def make_env(env_id, seed, dim):
         # Define at module level so it’s picklable for SubprocVecEnv
@@ -134,36 +130,14 @@ def train(dim, verbose=0, render_freq=None) -> None:
         render=False
     )
 
-    # Progress bar callback
-    class InfoProgressBar(ProgressBarCallback):
-        def __init__(self, description: str, postfix: dict | None = None):
-            super().__init__()
-            self._description = description
-            self._postfix = postfix or {}
-
-        def _resolve_bar(self):
-            return getattr(self, "progress_bar", None) or getattr(self, "pbar", None)
-
-        def _on_training_start(self) -> None:
-            super()._on_training_start()
-            bar = self._resolve_bar()
-            if bar is not None:
-                bar.set_description_str(self._description)
-                if self._postfix:
-                    bar.set_postfix(self._postfix, refresh=False)
-
-        def _on_step(self) -> bool:
-            bar = self._resolve_bar()
-            if bar is not None and self._postfix:
-                bar.set_postfix(self._postfix, refresh=False)
-            return super()._on_step()
-
-
-    tqdm_callback = InfoProgressBar(
-        description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
-        postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
-    )
-    callback = CallbackList([tqdm_callback, eval_callback])
+    callbacks = [eval_callback]
+    if not hpc:
+        tqdm_callback = InfoProgressBar(
+            description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
+            postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
+        )
+        callbacks.insert(0, tqdm_callback)
+    callback = CallbackList(callbacks)
 
     # Train the model
     model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"PPO_run_dim{dim}")
@@ -174,37 +148,15 @@ def train(dim, verbose=0, render_freq=None) -> None:
     df = _gather_monitor_csvs(SAVE_PATH)
     return df
 
-def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
-    """
-    Reads VecMonitor/Monitor CSVs and returns a tidy DataFrame with:
-      columns = ['episode_idx', 'r', 'l', 't', 'source']
-      r = episode return, l = episode length (steps), t = time since start (seconds)
-    """
-    files = sorted(glob.glob(os.path.join(log_dir, "train_monitor*.csv")))
-    dfs = []
-    for f in files:
-        # Monitor CSVs have commented headers with metadata; use comment='#'
-        d = pd.read_csv(f, comment="#")
-        # Add a monotonically increasing episode index per file then combine
-        d["episode_idx"] = range(1, len(d) + 1)
-        d["source"] = os.path.basename(f)
-        dfs.append(d[["episode_idx", "r", "l", "t", "source"]])
-    if not dfs:
-        return pd.DataFrame(columns=["episode_idx", "r", "l", "t", "source"])
-    df = pd.concat(dfs, ignore_index=True)
-    # If you want a single global episode index across all vec envs:
-    df["global_episode"] = range(1, len(df) + 1)
-    return df
-
 
 # Load the final model from the previous training run, and dipslay it playing the environment
-def test(dim) -> None:
+def test(dim, use_gpu: bool = False) -> None:
     from environments.envs.balloon_3d_env import Actions
 
     env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 2_000}))
 
     # Use a GPU if possible
-    device = torch.device("cuda") if (USE_GPU and torch.cuda.is_available()) else torch.device("cpu")
+    device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
     # Load the model
     model = PPO.load(MODEL_PATH, device=device)
@@ -234,31 +186,47 @@ def test(dim) -> None:
             next_state, reward, terminated, truncated, info = env.step(action_idx)
 
             effect = int(env.unwrapped._action_lut[action_idx])
-            text_action = (Actions(effect).name if effect in Actions._value2member_map_ else "UNKNOWN").upper()
+            act = (Actions(effect).name if effect in Actions._value2member_map_ else "?").upper()[:3]
 
-            components = info.get("reward_components", {})
-            reward_distance = components.get("distance", 0.0)
-            reward_direction = components.get("direction", 0.0)
-            reward_reached = components.get("reached", 0.0)
-            reward_effect = components.get("effect", 0.0)
-            print(f"|| Ep {episode+1} ",
-                  f"|| Step {steps:>6} ",
-                  f"|| Action: {text_action} ",
-                  f"|| Reward: {reward:+.4f} ",
-                  f"|| Components: [Dist.: {reward_distance:+.4f}, ",
-                  f"Dir.: {reward_direction:+.4f}, ",
-                  f"Rea.: {reward_reached:+.4f}, ",
-                  f"Eff.: {reward_effect:+.4f}] ||"
-                   )
+            pos = env.unwrapped._balloon.pos
+            if env.unwrapped.dim == 1:
+                pos_str = f"z={pos[0]:+.1f}"
+            elif env.unwrapped.dim == 2:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f}"
+            else:
+                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f},{pos[2]:+.1f}"
+
+            c = info.get("reward_components", {})
+            print(
+                f"E{episode+1}|S{steps:>5}|A:{act:<3}"
+                f"|Pos:{pos_str}"
+                f"|R:{reward:+.3f}"
+                f"|dst:{c.get('distance',0):+.3f}"
+                f" dir:{c.get('direction',0):+.3f}"
+                f" rea:{c.get('reached',0):+.3f}"
+                f" eff:{c.get('effect',0):+.3f}"
+            )
 
             state = next_state
             game_over = terminated or truncated
 
-            if pygame.event.peek(pygame.QUIT):
-                env.close()
-                return
+            # Check renderer flags (events are processed inside draw())
+            renderer = env.unwrapped.renderer
+            if renderer is not None:
+                if renderer.quit_requested:
+                    env.close()
+                    return
+                if renderer.skip_requested:
+                    renderer.skip_requested = False
+                    game_over = True
 
         t1 = time.time()
         print(f"{steps / (t1 - t0):.2f} steps/second")
+
+        # Show end screen with termination reason
+        reason = info.get("termination_reason", "Episode ended")
+        renderer = env.unwrapped.renderer
+        if renderer is not None:
+            renderer.show_end_screen(reason)
 
     return
