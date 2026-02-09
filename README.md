@@ -100,6 +100,13 @@ Their flight dataset is publicly available and is a key resource for validating 
 
 https://zenodo.org/records/5119968#.YVNdiGZKio5
 
+Github:
+https://github.com/google/balloon-learning-environment
+
+Publication:
+https://doi.org/10.1038/s41586-020-2939-8
+
+
 ## Testing / CI / CD
 - Run the whole suite locally with `pytest`; this mirrors the GitHub Actions workflow.
 - Scope to a module while iterating, e.g. `pytest tests/envs/ -k balloon`.
