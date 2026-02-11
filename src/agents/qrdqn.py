@@ -136,6 +136,18 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
     env.close()
     eval_env.close()
 
+    # Training summary
+    early_stopped = model.num_timesteps < TOTAL_TIMESTEPS
+    best_reward = eval_cb.best_mean_reward
+    print(f"\n{'='*50}")
+    print(f"Training complete {'(early stopped)' if early_stopped else '(full run)'}")
+    print(f"  Best eval reward: {best_reward:.2f}")
+    print(f"  Total timesteps:  {model.num_timesteps:,} / {TOTAL_TIMESTEPS:,}")
+    print(f"  Model saved to:   {os.path.abspath(MODEL_PATH)}")
+    if hpc:
+        print(f"  Device:           {device}")
+    print(f"{'='*50}\n")
+
     return _gather_monitor_csvs(SAVE_PATH)
 
 

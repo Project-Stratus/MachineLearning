@@ -59,7 +59,7 @@ def make_env_fn(dim: int) -> Callable[[], gym.Env]:
 
 
 # Create and train a PPO model from scratch. Returns a dataframe containing the reward attained at each episode.
-def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> None:
+def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> "pd.DataFrame":
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
@@ -144,6 +144,18 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
 
     # Save the model
     model.save(MODEL_PATH)
+
+    # Training summary
+    early_stopped = model.num_timesteps < TOTAL_TIMESTEPS
+    best_reward = eval_callback.best_mean_reward
+    print(f"\n{'='*50}")
+    print(f"Training complete {'(early stopped)' if early_stopped else '(full run)'}")
+    print(f"  Best eval reward: {best_reward:.2f}")
+    print(f"  Total timesteps:  {model.num_timesteps:,} / {TOTAL_TIMESTEPS:,}")
+    print(f"  Model saved to:   {os.path.abspath(MODEL_PATH)}")
+    if hpc:
+        print(f"  Device:           {device}")
+    print(f"{'='*50}\n")
 
     df = _gather_monitor_csvs(SAVE_PATH)
     return df

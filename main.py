@@ -43,7 +43,17 @@ if __name__ == "__main__":
 
     elif model == 'qrdqn':
         if args.train:
-            qrdqn.train(dim=args.dim, use_gpu=args.gpu, hpc=args.hpc)
+            df = qrdqn.train(dim=args.dim, use_gpu=args.gpu, hpc=args.hpc)
+            if args.save_fig:
+                plt.figure(figsize=(10,6))
+                plt.plot(df["global_episode"], df["r"])
+                plt.xlabel("Episode")
+                plt.ylabel("Reward")
+                plt.title("QR-DQN Training Reward Curve")
+                plt.grid()
+                plt.savefig(f"src/models/qr_dqn_model/training_curve_dim{args.dim}.png")
+                plt.close()
+                print(f"Training figure saved to src/models/qr_dqn_model/training_curve_dim{args.dim}.png")
         else:
             qrdqn.test(dim=args.dim, use_gpu=args.gpu)
 
