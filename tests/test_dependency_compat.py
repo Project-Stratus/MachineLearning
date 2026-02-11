@@ -6,12 +6,12 @@ import pytest
 
 
 class TestTorchCompat:
-    """Verify torch 2.7.x works with our SB3 + gymnasium stack."""
+    """Verify torch 2.8.x works with our SB3 + gymnasium stack."""
 
     def test_torch_imports(self):
         import torch
 
-        assert torch.__version__.startswith("2.7")
+        assert torch.__version__.startswith("2.8")
 
     def test_torch_tensor_ops(self):
         import torch
@@ -54,7 +54,7 @@ class TestSecurityPatchedPackages:
             ("fonttools", "4.60.2"),
             ("filelock", "3.20.3"),
             ("jinja2", "3.1.6"),
-            ("torch", "2.7.1"),
+            ("torch", "2.8.0"),
         ],
     )
     def test_minimum_patched_version(self, package, min_version):
