@@ -1,12 +1,14 @@
 # qr_dqn_runner.py
 import os
 import time
+import multiprocessing as mp
 
 import gymnasium as gym
 import pandas as pd
 import torch
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold, CallbackList
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
 from sb3_contrib import QRDQN
 
 import environments  # registers the Balloon3D-v0 environment
@@ -51,6 +53,9 @@ ENV_CONFIG = dict(
     wind_pattern="altitude_shear_2d",  # wind direction rotates with altitude (N→E→S→W)
 )
 
+MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
+N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))
+
 
 # def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
 #     """
@@ -80,6 +85,34 @@ def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict 
     return env
 
 
+def _make_vec_env_fn(env_id: str, dim: int, seed: int, config: dict):
+    """Return a picklable factory for SubprocVecEnv workers."""
+    def _init():
+        env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True, config=config)
+        env = Monitor(env)
+        env.reset(seed=seed)
+        return env
+    return _init
+
+
+def _build_vec_env(n_envs: int, env_id: str, dim: int, seed: int = SEED):
+    cfg = dict(ENV_CONFIG)
+    if n_envs != 1:
+        if mp.get_start_method(allow_none=True) != "spawn":
+            mp.set_start_method("spawn", force=True)
+        try:
+            venv = SubprocVecEnv([_make_vec_env_fn(env_id, dim, seed + i, cfg) for i in range(n_envs)])
+        except Exception as e:
+            print(f"SubprocVecEnv failed ({e}). Falling back to DummyVecEnv.")
+            venv = DummyVecEnv([_make_vec_env_fn(env_id, dim, seed + i, cfg) for i in range(n_envs)])
+    else:
+        venv = DummyVecEnv([_make_vec_env_fn(env_id, dim, seed, cfg)])
+
+    os.makedirs(SAVE_PATH, exist_ok=True)
+    monitor_file = os.path.join(SAVE_PATH, "train_monitor")
+    return VecMonitor(venv, filename=monitor_file)
+
+
 def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> pd.DataFrame:
     """
     Train QR-DQN on the same environment. Returns a DataFrame of episode returns/lengths.
@@ -90,9 +123,9 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
 
     device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
-    os.makedirs(SAVE_PATH, exist_ok=True)
-    monitor_file = os.path.join(SAVE_PATH, "train_monitor")
-    env = _make_env(ENVIRONMENT_NAME, dim=dim, seed=SEED, monitor_file=monitor_file)
+    print(f"Training with {N_ENVS} environments, dim={dim}.")
+
+    env = _build_vec_env(N_ENVS, ENVIRONMENT_NAME, dim=dim, seed=SEED)
 
     model = QRDQN(
         policy="MlpPolicy",
@@ -125,7 +158,7 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
     callbacks = [eval_cb]
     if not hpc:
         tqdm_cb = InfoProgressBar(
-            description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | device={device} |",
+            description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
             postfix=dict(gamma=TRAIN_CFG["gamma"])
         )
         callbacks.insert(0, tqdm_cb)
