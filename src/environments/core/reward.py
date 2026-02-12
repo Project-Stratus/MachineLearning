@@ -69,9 +69,9 @@ def balloon_reward(
     prev_distance: float,
     max_distance: float,
     success_radius: float = 500.0,        # inner radius for full bonus (m)
-    success_outer_radius: float = 1500.0,  # outer radius where ramp begins (m)
+    success_outer_radius: float = 3000.0,  # outer radius where ramp begins (m)
     success_speed: float = 0.2,
-    direction_scale: float = 0.05,
+    direction_scale: float = 0.1,
 ) -> tuple[float, dict[str, float], float]:
     """Composite reward used by the Balloon environments.
 

@@ -113,7 +113,7 @@ class Balloon3DEnv(gym.Env):
         z_range=(0.0, ALT_MAX),
         wind_mag=10.0,           # max wind speed [m/s]
         wind_cells=20,           # grid for wind visualisation
-        inflate_rate=0.01,       # Δvolume per *inflate* action
+        inflate_rate=0.05,       # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
     )
@@ -342,10 +342,24 @@ class Balloon3DEnv(gym.Env):
                 if dist > MIN_START_DISTANCE:
                     break
         else:
-            # Random goal - original behavior
+            # Goal fixed at center in x/y, random in z (station-keeping scenario)
+            if self.dim == 1:
+                goal = np.array([self.np_random.uniform(*self.z_range)], dtype=np.float64)
+            elif self.dim == 2:
+                goal = np.array([0.0, 0.0], dtype=np.float64)
+            else:  # dim == 3
+                goal = np.array([0.0, 0.0, self.np_random.uniform(*self.z_range)], dtype=np.float64)
+
+            # Balloon starts within 50% of XY_MAX so it's always closer to
+            # the target than to the nearest edge.
+            spawn_ranges = []
+            for lo, hi in self._ranges:
+                half = (hi - lo) * 0.25  # 25% from center = 50% of range
+                mid = (lo + hi) * 0.5
+                spawn_ranges.append((mid - half, mid + half))
+
             while True:
-                pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-                goal = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
+                pos0 = np.array([self.np_random.uniform(*r) for r in spawn_ranges], dtype=np.float64)
                 dist = float(np.linalg.norm(pos0 - goal))
                 if dist > MIN_START_DISTANCE:
                     break
