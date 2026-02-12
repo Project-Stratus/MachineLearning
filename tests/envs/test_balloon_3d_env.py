@@ -301,8 +301,9 @@ class TestBalloon3DEnvTermination:
         try:
             env.reset(seed=42)
             # In 2D, altitude is fixed, so no crash possible
+            # Use action 1 (do nothing) to avoid deflation from repeated deflate actions
             for _ in range(50):
-                _, _, terminated, _, _ = env.step(0)
+                _, _, terminated, _, _ = env.step(1)
                 assert not terminated, "2D should not terminate on crash"
         finally:
             env.close()

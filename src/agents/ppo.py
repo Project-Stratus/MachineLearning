@@ -216,7 +216,8 @@ def test(dim, use_gpu: bool = False) -> None:
                 f"|dst:{c.get('distance',0):+.3f}"
                 f" dir:{c.get('direction',0):+.3f}"
                 f" rea:{c.get('reached',0):+.3f}"
-                f" eff:{c.get('effect',0):+.3f}"
+                f" srv:{c.get('survival',0):+.3f}"
+                f" act:{c.get('action',0):+.3f}"
             )
 
             state = next_state

@@ -105,17 +105,18 @@ class Balloon3DEnv(gym.Env):
     DEFAULTS: Dict[str, Any] = dict(
         dim=3,                    # 1, 2 or 3 dimensions
         time_max=5_000,           # steps per episode
-        punishment=-5.0,          # reward on crash (ground collision)
-        deflate_punishment=-10.0, # reward on full deflation (helium loss)
-        pop_punishment=-10.0,     # reward on altitude ceiling breach (balloon pops)
+        punishment=-100.0,        # reward on crash (ground collision)
+        deflate_punishment=-100.0, # reward on full deflation (helium loss)
+        pop_punishment=-100.0,    # reward on altitude ceiling breach (balloon pops)
         x_range=(-XY_MAX, XY_MAX),
         y_range=(-XY_MAX, XY_MAX),
         z_range=(0.0, ALT_MAX),
-        wind_mag=10.0,           # max wind speed [m/s]
+        wind_mag=5.0,            # max wind speed [m/s]
         wind_cells=20,           # grid for wind visualisation
-        inflate_rate=0.05,       # Δvolume per *inflate* action
+        inflate_rate=0.5,        # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
+        wind_layers=2,                # number of full wind rotations over altitude range (altitude_shear_2d only)
     )
 
     def __init__(self,
@@ -174,7 +175,8 @@ class Balloon3DEnv(gym.Env):
             cells=cfg["wind_cells"],
             pattern=self.cfg.get("wind_pattern", "sinusoid"),
             default_mag=cfg["wind_mag"],
-            wind_cfg_path=self.wind_cfg_path
+            wind_cfg_path=self.wind_cfg_path,
+            wind_layers=cfg["wind_layers"],
         )
 
         self.x_centers = self.wind.x_centers

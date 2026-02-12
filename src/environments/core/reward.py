@@ -72,6 +72,8 @@ def balloon_reward(
     success_outer_radius: float = 3000.0,  # outer radius where ramp begins (m)
     success_speed: float = 0.2,
     direction_scale: float = 0.1,
+    survival_bonus: float = 0.1,
+    action_cost: float = 0.01,
 ) -> tuple[float, dict[str, float], float]:
     """Composite reward used by the Balloon environments.
 
@@ -121,13 +123,18 @@ def balloon_reward(
         if distance < success_radius and speed2 < success_speed * success_speed:
             reached_component = 0.3
 
-    effect_component = 0.0
+    # SURVIVAL bonus: small positive reward for staying alive each step
+    survival_component = survival_bonus
 
-    total = distance_component + direction_component + reached_component + effect_component
+    # ACTION COST: penalise inflate/deflate to discourage helium waste
+    action_component = -action_cost if effect != 0 else 0.0
+
+    total = distance_component + direction_component + reached_component + survival_component + action_component
     components = dict(
         distance=distance_component,
         direction=direction_component,
         reached=reached_component,
-        effect=effect_component,
+        survival=survival_component,
+        action=action_component,
     )
     return total, components, distance

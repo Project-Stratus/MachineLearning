@@ -10,7 +10,7 @@ M_AIR = 0.0289647           # molar mass of air (kg/mol)
 T_BALLOON = 273.15 + 20     # internal gas temperature (K) (~20°C)
 T_AIR = 273.15 + 15         # ambient air temperature (K)
 SCALE_HEIGHT = 8500         # scale height (m)
-XY_MAX = 10_000.0           # Maximum horizontal operating distance from origin (m)
+XY_MAX = 50_000.0           # Maximum horizontal operating distance from origin (m)
 DT = 1.0                    # Time step (s)
 
 # ----- DERIVED CONSTANTS -----
