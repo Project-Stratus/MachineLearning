@@ -83,11 +83,8 @@ class TestBalloonReward:
 
     @pytest.fixture
     def reward_kwargs(self):
-        """Default kwargs for balloon_reward (unused params kept for signature compat)."""
+        """Default kwargs for balloon_reward."""
         return dict(
-            punishment=-100.0,
-            prev_distance=20000.0,
-            max_distance=100000.0,
             station_radius=10000.0,
             reward_dropoff=0.4,
             reward_halflife=20000.0,
@@ -98,10 +95,8 @@ class TestBalloonReward:
         result = balloon_reward(
             balloon_pos=np.array([100.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert isinstance(result, tuple)
@@ -116,10 +111,8 @@ class TestBalloonReward:
         _, components, _ = balloon_reward(
             balloon_pos=np.array([100.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert "station" in components
@@ -130,10 +123,8 @@ class TestBalloonReward:
         total, components, _ = balloon_reward(
             balloon_pos=np.array([500.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([-1.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         expected = sum(components.values())
@@ -144,10 +135,8 @@ class TestBalloonReward:
         total, components, _ = balloon_reward(
             balloon_pos=np.array([5000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert total == pytest.approx(1.0)
@@ -160,10 +149,8 @@ class TestBalloonReward:
         total, components, _ = balloon_reward(
             balloon_pos=np.array([10001.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert total == pytest.approx(0.4, abs=0.01)
@@ -174,10 +161,8 @@ class TestBalloonReward:
         total, _, _ = balloon_reward(
             balloon_pos=np.array([30000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert total == pytest.approx(0.2, rel=1e-3)
@@ -187,10 +172,8 @@ class TestBalloonReward:
         total, _, _ = balloon_reward(
             balloon_pos=np.array([500000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert total < 0.001
@@ -200,19 +183,15 @@ class TestBalloonReward:
         total_far, _, _ = balloon_reward(
             balloon_pos=np.array([50000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         total_near, _, _ = balloon_reward(
             balloon_pos=np.array([15000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         assert total_near > total_far
@@ -223,10 +202,8 @@ class TestBalloonReward:
             total, _, _ = balloon_reward(
                 balloon_pos=np.array([float(dist)]),
                 goal_pos=np.array([0.0]),
-                velocity=np.array([0.0]),
                 dim=1,
                 terminated=False,
-                effect=0,
                 **reward_kwargs,
             )
             assert 0.0 <= total <= 1.0
@@ -236,10 +213,8 @@ class TestBalloonReward:
         total, components, _ = balloon_reward(
             balloon_pos=np.array([0.0]),
             goal_pos=np.array([1000.0]),
-            velocity=np.array([0.0]),
             dim=1,
             terminated=True,
-            effect=0,
             **reward_kwargs,
         )
         assert total == 0.0
@@ -253,10 +228,8 @@ class TestBalloonReward:
         _, _, new_dist = balloon_reward(
             balloon_pos=pos,
             goal_pos=goal,
-            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
-            effect=0,
             **reward_kwargs,
         )
         expected_dist = l2_distance(pos, goal, dim=1)
@@ -268,19 +241,15 @@ class TestBalloonReward:
             if dim == 1:
                 pos = np.array([500.0])
                 goal = np.array([0.0])
-                vel = np.array([0.0])
             else:
                 pos = np.array([300.0, 400.0, 500.0])
                 goal = np.array([0.0, 0.0]) if dim == 2 else np.array([0.0, 0.0, 0.0])
-                vel = np.array([0.0, 0.0, 0.0])
 
             total, components, dist = balloon_reward(
                 balloon_pos=pos,
                 goal_pos=goal,
-                velocity=vel,
                 dim=dim,
                 terminated=False,
-                effect=0,
                 **reward_kwargs,
             )
             assert np.isfinite(total)

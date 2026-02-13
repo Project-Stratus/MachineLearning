@@ -45,7 +45,7 @@ POLICY_KWARGS = dict(
 
 TOTAL_TIMESTEPS = 5_000_000  # Total training steps
 EVAL_FREQ = 500_000  # Evaluate every n steps
-REWARD_THRESHOLD = 10_000  # Stop training when the model reaches this reward
+REWARD_THRESHOLD = 4_800  # ~96% of max episode reward (5000); proves sustained station-keeping
 
 MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
 N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() //2))

@@ -45,13 +45,8 @@ def balloon_reward(
     *,
     balloon_pos: np.ndarray,
     goal_pos: np.ndarray,
-    velocity: np.ndarray,
     dim: int,
     terminated: bool,
-    effect: int,
-    punishment: float,
-    prev_distance: float,
-    max_distance: float,
     station_radius: float = 10_000.0,
     reward_dropoff: float = 0.4,
     reward_halflife: float = 20_000.0,
@@ -65,8 +60,8 @@ def balloon_reward(
       - On termination: reward is 0.0 (losing all future reward is
         the punishment).
 
-    Returns the total reward, a component breakdown, and the updated
-    reference distance for the next step.
+    Returns the total reward, a component breakdown, and the current
+    distance to goal.
     """
     distance = l2_distance(balloon_pos, goal_pos, dim)
 

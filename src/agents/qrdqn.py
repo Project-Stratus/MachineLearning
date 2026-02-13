@@ -45,8 +45,8 @@ POLICY_KWARGS = dict(
 )
 
 TOTAL_TIMESTEPS = 15_000_000
-EVAL_FREQ = 1_000_000
-REWARD_THRESHOLD = 10_000  # stop early on good performance
+EVAL_FREQ = 250_000
+REWARD_THRESHOLD = 4_800  # ~96% of max episode reward (5000); proves sustained station-keeping
 
 # Environment config overrides (passed to Balloon3DEnv)
 ENV_CONFIG = dict(

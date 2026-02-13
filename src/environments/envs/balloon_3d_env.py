@@ -46,12 +46,18 @@ scaled to [0,1]:
 =========
 Reward & Termination
 =========
-Reward is negative Euclidean distance to the goal.
-Additional penalty of -400 is applied if the balloon crashes.
+Perciatelli-style reward (inspired by Google BLE):
++ Inside station-keeping radius (default 10 km): flat reward of 1.0
++ Outside radius: exponential decay toward 0.0
++ On termination: reward is 0.0 (forfeiting future reward is the penalty)
++ Reward range: [0, 1]
 
 Termination occurs when:
 + Balloon altitude ≤ 0 m (crash).
-+ Time limit reached (default 1000 steps).
++ Balloon altitude ≥ altitude ceiling (pop).
++ Balloon fully deflated (helium loss).
++ Balloon exits XY bounds (2D/3D only).
++ Time limit reached (default 5000 steps).
 
 =========
 Visualisation
@@ -105,9 +111,6 @@ class Balloon3DEnv(gym.Env):
     DEFAULTS: Dict[str, Any] = dict(
         dim=3,                    # 1, 2 or 3 dimensions
         time_max=5_000,           # steps per episode
-        punishment=-100.0,        # reward on crash (ground collision)
-        deflate_punishment=-100.0, # reward on full deflation (helium loss)
-        pop_punishment=-100.0,    # reward on altitude ceiling breach (balloon pops)
         x_range=(-XY_MAX, XY_MAX),
         y_range=(-XY_MAX, XY_MAX),
         z_range=(0.0, ALT_MAX),
@@ -364,16 +367,6 @@ class Balloon3DEnv(gym.Env):
         self.goal = goal
         self.goal_norm = self._normalise_position(self.goal).astype(np.float32)
 
-        # Compute max possible distance for reward normalisation
-        # dim 2 and 3 both use horizontal distance only (altitude is not an objective)
-        x_width = self.x_range[1] - self.x_range[0]
-        y_width = self.y_range[1] - self.y_range[0]
-        z_width = self.z_range[1] - self.z_range[0]
-        if self.dim == 1:
-            self._max_distance = z_width
-        else:  # dim 2 and 3: horizontal only
-            self._max_distance = float(np.sqrt(x_width**2 + y_width**2))
-
         real_dim = 3 if self.dim == 2 else self.dim
         # For 2D mode, balloon is internally 3D with fixed altitude z0
         init_pos = np.append(pos0, self.z0) if self.dim == 2 else pos0
@@ -477,26 +470,11 @@ class Balloon3DEnv(gym.Env):
         terminated = crashed or popped or deflated or out_of_bounds
         self.truncated = self._time >= self.cfg["time_max"]
 
-        # Select appropriate punishment based on termination cause
-        if deflated:
-            punishment = self.cfg["deflate_punishment"]
-        elif popped:
-            punishment = self.cfg["pop_punishment"]
-        elif out_of_bounds:
-            punishment = self.cfg["punishment"]
-        else:
-            punishment = self.cfg["punishment"]
-
         reward_total, reward_components, self._prev_distance = balloon_reward(
             balloon_pos=self._balloon.pos,
             goal_pos=self.goal,
-            velocity=self._balloon.vel,
             dim=self.dim,
             terminated=terminated,
-            effect=effect,
-            punishment=punishment,
-            prev_distance=getattr(self, "_prev_distance", float("inf")),
-            max_distance=self._max_distance,
         )
 
         components_for_info = dict(reward_components)
