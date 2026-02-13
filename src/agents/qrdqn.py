@@ -241,11 +241,8 @@ def test(dim: int, use_gpu: bool = False) -> None:
                 f"E{episode+1}|S{steps:>5}|A:{act:<3}"
                 f"|Pos:{pos_str}"
                 f"|R:{reward:+.3f}"
-                f"|dst:{c.get('distance',0):+.3f}"
-                f" dir:{c.get('direction',0):+.3f}"
-                f" rea:{c.get('reached',0):+.3f}"
-                f" srv:{c.get('survival',0):+.3f}"
-                f" act:{c.get('action',0):+.3f}"
+                f"|stn:{c.get('station',0):.3f}"
+                f" dec:{c.get('decay',0):.3f}"
             )
 
             state = next_state

@@ -190,9 +190,8 @@ class TestBalloon3DEnvStep:
         _, _, _, _, info = env.step(1)
         assert "reward_components" in info
         components = info["reward_components"]
-        assert "distance" in components
-        assert "direction" in components
-        assert "reached" in components
+        assert "station" in components
+        assert "decay" in components
         assert "total" in components
 
     def test_step_reward_matches_total(self, env_any_dim):

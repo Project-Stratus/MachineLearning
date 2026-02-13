@@ -260,7 +260,7 @@ class TestRewardConsistency:
             for _ in range(100):
                 _, reward, terminated, _, _ = env.step(1)  # do nothing
                 if terminated:
-                    assert reward == -5.0, "Crash should give punishment reward"
+                    assert reward == 0.0, "Crash should give zero reward (forfeits future reward)"
                     break
             else:
                 pytest.skip("Balloon didn't crash in time")

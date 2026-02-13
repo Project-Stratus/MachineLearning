@@ -3,16 +3,17 @@ core.reward
 -----------
 
 Reusable reward helpers for the balloon environments.
+
+Reward style inspired by Google's Balloon Learning Environment (Perciatelli):
+  - Inside station-keeping radius: flat 1.0
+  - Outside radius: exponential decay with configurable half-life
+  - Terminated: 0.0 (no extra punishment — dying forfeits future reward)
+  - Reward range: [0, 1]
 """
 
 from __future__ import annotations
 import math
 import numpy as np
-
-def _normalise_distance(distance: float, max_distance: float) -> float:
-    """Return a distance scaled to [-1, 0], clamped to avoid division by zero."""
-    normaliser = max(max_distance, 1.0)
-    return -float(distance / normaliser)
 
 
 # ------------------------------------------------------------------ #
@@ -20,41 +21,24 @@ def _normalise_distance(distance: float, max_distance: float) -> float:
 # ------------------------------------------------------------------ #
 def l2_distance(balloon_pos: np.ndarray, goal_pos: np.ndarray, dim: int) -> float:
     """
-    Return Euclidean distance in the *active* dimensions:
-        dim=1 → |z - z_goal|  (balloon uses last index for altitude)
+    Return Euclidean distance in the *reward-relevant* dimensions:
+        dim=1 → |z - z_goal|  (altitude only)
         dim=2 → sqrt((x-xg)^2 + (y-yg)^2)
-        dim=3 → full 3-D norm
+        dim=3 → sqrt((x-xg)^2 + (y-yg)^2)  (x-y only; altitude is the
+                 agent's control mechanism, not an objective)
     """
     if dim == 1:
         return abs(float(balloon_pos[-1]) - float(goal_pos[0]))
-    elif dim == 2:
+    else:  # dim 2 and 3: horizontal distance only
         dx = float(balloon_pos[0]) - float(goal_pos[0])
         dy = float(balloon_pos[1]) - float(goal_pos[1])
         return math.sqrt(dx * dx + dy * dy)
-    else:
-        dx = float(balloon_pos[0]) - float(goal_pos[0])
-        dy = float(balloon_pos[1]) - float(goal_pos[1])
-        dz = float(balloon_pos[2]) - float(goal_pos[2])
-        return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 # ------------------------------------------------------------------ #
 # reward functions
 # ------------------------------------------------------------------ #
-def distance_reward(
-    balloon_pos: np.ndarray,
-    goal_pos: np.ndarray,
-    dim: int,
-    terminated: bool,
-    punishment: float,
-    max_distance: float,
-) -> float:
-    """Negative normalised distance to goal with a crash punishment."""
-    if terminated:
-        return punishment
-
-    distance = l2_distance(balloon_pos, goal_pos, dim)
-    return _normalise_distance(distance, max_distance)
+_LN_HALF = -0.69314718056  # ln(0.5), used for exponential decay
 
 
 def balloon_reward(
@@ -68,73 +52,43 @@ def balloon_reward(
     punishment: float,
     prev_distance: float,
     max_distance: float,
-    success_radius: float = 500.0,        # inner radius for full bonus (m)
-    success_outer_radius: float = 3000.0,  # outer radius where ramp begins (m)
-    success_speed: float = 0.2,
-    direction_scale: float = 0.1,
-    survival_bonus: float = 0.1,
-    action_cost: float = 0.01,
+    station_radius: float = 10_000.0,
+    reward_dropoff: float = 0.4,
+    reward_halflife: float = 20_000.0,
 ) -> tuple[float, dict[str, float], float]:
     """Composite reward used by the Balloon environments.
+
+    Inspired by Google BLE's Perciatelli reward:
+      - Inside *station_radius*: flat reward of 1.0
+      - Outside: drops to *reward_dropoff* at the boundary, then
+        exponentially decays with *reward_halflife* (in metres).
+      - On termination: reward is 0.0 (losing all future reward is
+        the punishment).
 
     Returns the total reward, a component breakdown, and the updated
     reference distance for the next step.
     """
-
     distance = l2_distance(balloon_pos, goal_pos, dim)
 
     if terminated:
-        total = punishment
-        components = dict(distance=punishment, direction=0.0, reached=0.0, effect=0.0)
+        total = 0.0
+        components = dict(station=0.0, decay=0.0)
         return total, components, distance
 
-    # DISTANCE reward
-    # Normalised distance to goal, in [-1, 0]
-    distance_component = _normalise_distance(distance, max_distance)
-
-    # DIRECTION reward
-    # Positive when distance is shrinking, negative when growing
-    # Scaled to [-1, 1] based on success_radius
-    distance_delta = prev_distance - distance
-    if success_radius <= 0.0:
-        scaled_delta = 0.0
+    if distance <= station_radius:
+        station_component = 1.0
+        decay_component = 0.0
     else:
-        scaled_delta = distance_delta / success_radius
-        if scaled_delta > 1.0:
-            scaled_delta = 1.0
-        elif scaled_delta < -1.0:
-            scaled_delta = -1.0
-    direction_component = direction_scale * scaled_delta
+        station_component = 0.0
+        excess = distance - station_radius
+        halflife_m = max(reward_halflife, 1.0)
+        decay_component = reward_dropoff * math.exp(
+            _LN_HALF / halflife_m * excess
+        )
 
-    # REACHED reward
-    # Graduated bonus: linear ramp from success_outer_radius to
-    # success_radius, full bonus inside success_radius when slow.
-    speed2 = 0.0
-    for i in range(dim):
-        v = float(velocity[i])
-        speed2 += v * v
-    reached_component = 0.0
-    if distance < success_outer_radius:
-        proximity = (success_outer_radius - distance) / (success_outer_radius - success_radius)
-        if proximity > 1.0:
-            proximity = 1.0
-        reached_component = 0.3 * proximity
-        # Extra: full bonus only when inside inner radius AND moving slowly
-        if distance < success_radius and speed2 < success_speed * success_speed:
-            reached_component = 0.3
-
-    # SURVIVAL bonus: small positive reward for staying alive each step
-    survival_component = survival_bonus
-
-    # ACTION COST: penalise inflate/deflate to discourage helium waste
-    action_component = -action_cost if effect != 0 else 0.0
-
-    total = distance_component + direction_component + reached_component + survival_component + action_component
+    total = station_component + decay_component
     components = dict(
-        distance=distance_component,
-        direction=direction_component,
-        reached=reached_component,
-        survival=survival_component,
-        action=action_component,
+        station=station_component,
+        decay=decay_component,
     )
     return total, components, distance

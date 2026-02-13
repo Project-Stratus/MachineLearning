@@ -326,31 +326,25 @@ class Balloon3DEnv(gym.Env):
         # Determine goal based on wind pattern
         wind_pattern = self.cfg.get("wind_pattern", "sinusoid")
 
-        if wind_pattern == "altitude_shear":
-            # Fixed goal at wind crossover point (center of domain, midpoint altitude)
-            # This allows the agent to station-keep by oscillating altitude
-            if self.dim == 1:
-                goal = np.array([self.z0], dtype=np.float64)  # z midpoint
-            elif self.dim == 2:
-                goal = np.array([0.0, 0.0], dtype=np.float64)  # x,y center
-            else:  # dim == 3
-                z_mid = 0.5 * (self.z_range[0] + self.z_range[1])
-                goal = np.array([0.0, 0.0, z_mid], dtype=np.float64)  # center, at wind crossover
+        if self.dim == 1:
+            # 1D: altitude only — goal is a target altitude
+            if wind_pattern == "altitude_shear":
+                goal = np.array([self.z0], dtype=np.float64)
+            else:
+                goal = np.array([self.np_random.uniform(*self.z_range)], dtype=np.float64)
 
-            # Random starting position far enough from the fixed goal
             while True:
-                pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-                dist = float(np.linalg.norm(pos0 - goal))
-                if dist > MIN_START_DISTANCE:
+                pos0 = np.array([self.np_random.uniform(*self.z_range)], dtype=np.float64)
+                if abs(pos0[0] - goal[0]) > MIN_START_DISTANCE:
                     break
         else:
-            # Goal fixed at center in x/y, random in z (station-keeping scenario)
-            if self.dim == 1:
-                goal = np.array([self.np_random.uniform(*self.z_range)], dtype=np.float64)
-            elif self.dim == 2:
-                goal = np.array([0.0, 0.0], dtype=np.float64)
+            # 2D/3D: goal is x,y center (station-keeping).
+            # Altitude is the agent's control mechanism, not an objective.
+            goal_xy = np.array([0.0, 0.0], dtype=np.float64)
+            if self.dim == 2:
+                goal = goal_xy
             else:  # dim == 3
-                goal = np.array([0.0, 0.0, self.np_random.uniform(*self.z_range)], dtype=np.float64)
+                goal = np.array([0.0, 0.0, self.z0], dtype=np.float64)
 
             # Balloon starts within 50% of XY_MAX so it's always closer to
             # the target than to the nearest edge.
@@ -362,23 +356,23 @@ class Balloon3DEnv(gym.Env):
 
             while True:
                 pos0 = np.array([self.np_random.uniform(*r) for r in spawn_ranges], dtype=np.float64)
-                dist = float(np.linalg.norm(pos0 - goal))
-                if dist > MIN_START_DISTANCE:
+                # Check horizontal distance only for spawn validation
+                dist_xy = float(np.sqrt((pos0[0] - goal[0])**2 + (pos0[1] - goal[1])**2))
+                if dist_xy > MIN_START_DISTANCE:
                     break
 
         self.goal = goal
         self.goal_norm = self._normalise_position(self.goal).astype(np.float32)
 
         # Compute max possible distance for reward normalisation
+        # dim 2 and 3 both use horizontal distance only (altitude is not an objective)
         x_width = self.x_range[1] - self.x_range[0]
         y_width = self.y_range[1] - self.y_range[0]
         z_width = self.z_range[1] - self.z_range[0]
         if self.dim == 1:
             self._max_distance = z_width
-        elif self.dim == 2:
+        else:  # dim 2 and 3: horizontal only
             self._max_distance = float(np.sqrt(x_width**2 + y_width**2))
-        else:  # dim == 3
-            self._max_distance = float(np.sqrt(x_width**2 + y_width**2 + z_width**2))
 
         real_dim = 3 if self.dim == 2 else self.dim
         # For 2D mode, balloon is internally 3D with fixed altitude z0
