@@ -26,7 +26,7 @@ dependencies = [
   "networkx==3.4.2",
   "numba>=0.60,<0.62",
   "numpy==2.2.2",
-  "packaging==24.2",
+  "packaging==26.0",
   "pandas==2.2.3",
   "pillow==12.1.1",
   "pygame==2.6.1",
