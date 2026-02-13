@@ -5,7 +5,7 @@ Farama-Notifications==0.0.4
 filelock==3.20.3
 fonttools==4.60.2
 fsspec==2025.2.0
-gymnasium==1.0.0
+gymnasium==1.2.3
 Jinja2==3.1.6
 kiwisolver==1.4.8
 MarkupSafe==3.0.2
@@ -35,7 +35,7 @@ pyparsing==3.2.1
 python-dateutil==2.9.0.post0
 pytz==2025.1
 six==1.17.0
-stable_baselines3==2.5.0
+stable_baselines3==2.7.1
 stable-baselines3[extra]
 sympy==1.13.3
 torch==2.8.0
