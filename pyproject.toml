@@ -28,7 +28,7 @@ dependencies = [
   "numpy==2.2.2",
   "packaging==24.2",
   "pandas==2.2.3",
-  "pillow==11.1.0",
+  "pillow==12.1.1",
   "pygame==2.6.1",
   "pyparsing==3.2.1",
   "python-dateutil==2.9.0.post0",
