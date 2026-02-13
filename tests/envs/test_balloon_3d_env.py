@@ -190,9 +190,8 @@ class TestBalloon3DEnvStep:
         _, _, _, _, info = env.step(1)
         assert "reward_components" in info
         components = info["reward_components"]
-        assert "distance" in components
-        assert "direction" in components
-        assert "reached" in components
+        assert "station" in components
+        assert "decay" in components
         assert "total" in components
 
     def test_step_reward_matches_total(self, env_any_dim):
@@ -301,8 +300,9 @@ class TestBalloon3DEnvTermination:
         try:
             env.reset(seed=42)
             # In 2D, altitude is fixed, so no crash possible
+            # Use action 1 (do nothing) to avoid deflation from repeated deflate actions
             for _ in range(50):
-                _, _, terminated, _, _ = env.step(0)
+                _, _, terminated, _, _ = env.step(1)
                 assert not terminated, "2D should not terminate on crash"
         finally:
             env.close()

@@ -105,17 +105,18 @@ class Balloon3DEnv(gym.Env):
     DEFAULTS: Dict[str, Any] = dict(
         dim=3,                    # 1, 2 or 3 dimensions
         time_max=5_000,           # steps per episode
-        punishment=-5.0,          # reward on crash (ground collision)
-        deflate_punishment=-10.0, # reward on full deflation (helium loss)
-        pop_punishment=-10.0,     # reward on altitude ceiling breach (balloon pops)
+        punishment=-100.0,        # reward on crash (ground collision)
+        deflate_punishment=-100.0, # reward on full deflation (helium loss)
+        pop_punishment=-100.0,    # reward on altitude ceiling breach (balloon pops)
         x_range=(-XY_MAX, XY_MAX),
         y_range=(-XY_MAX, XY_MAX),
         z_range=(0.0, ALT_MAX),
-        wind_mag=10.0,           # max wind speed [m/s]
+        wind_mag=5.0,            # max wind speed [m/s]
         wind_cells=20,           # grid for wind visualisation
-        inflate_rate=0.01,       # Δvolume per *inflate* action
+        inflate_rate=0.5,        # Δvolume per *inflate* action
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
+        wind_layers=2,                # number of full wind rotations over altitude range (altitude_shear_2d only)
     )
 
     def __init__(self,
@@ -174,7 +175,8 @@ class Balloon3DEnv(gym.Env):
             cells=cfg["wind_cells"],
             pattern=self.cfg.get("wind_pattern", "sinusoid"),
             default_mag=cfg["wind_mag"],
-            wind_cfg_path=self.wind_cfg_path
+            wind_cfg_path=self.wind_cfg_path,
+            wind_layers=cfg["wind_layers"],
         )
 
         self.x_centers = self.wind.x_centers
@@ -324,45 +326,53 @@ class Balloon3DEnv(gym.Env):
         # Determine goal based on wind pattern
         wind_pattern = self.cfg.get("wind_pattern", "sinusoid")
 
-        if wind_pattern == "altitude_shear":
-            # Fixed goal at wind crossover point (center of domain, midpoint altitude)
-            # This allows the agent to station-keep by oscillating altitude
-            if self.dim == 1:
-                goal = np.array([self.z0], dtype=np.float64)  # z midpoint
-            elif self.dim == 2:
-                goal = np.array([0.0, 0.0], dtype=np.float64)  # x,y center
-            else:  # dim == 3
-                z_mid = 0.5 * (self.z_range[0] + self.z_range[1])
-                goal = np.array([0.0, 0.0, z_mid], dtype=np.float64)  # center, at wind crossover
+        if self.dim == 1:
+            # 1D: altitude only — goal is a target altitude
+            if wind_pattern == "altitude_shear":
+                goal = np.array([self.z0], dtype=np.float64)
+            else:
+                goal = np.array([self.np_random.uniform(*self.z_range)], dtype=np.float64)
 
-            # Random starting position far enough from the fixed goal
             while True:
-                pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-                dist = float(np.linalg.norm(pos0 - goal))
-                if dist > MIN_START_DISTANCE:
+                pos0 = np.array([self.np_random.uniform(*self.z_range)], dtype=np.float64)
+                if abs(pos0[0] - goal[0]) > MIN_START_DISTANCE:
                     break
         else:
-            # Random goal - original behavior
+            # 2D/3D: goal is x,y center (station-keeping).
+            # Altitude is the agent's control mechanism, not an objective.
+            goal_xy = np.array([0.0, 0.0], dtype=np.float64)
+            if self.dim == 2:
+                goal = goal_xy
+            else:  # dim == 3
+                goal = np.array([0.0, 0.0, self.z0], dtype=np.float64)
+
+            # Balloon starts within 50% of XY_MAX so it's always closer to
+            # the target than to the nearest edge.
+            spawn_ranges = []
+            for lo, hi in self._ranges:
+                half = (hi - lo) * 0.25  # 25% from center = 50% of range
+                mid = (lo + hi) * 0.5
+                spawn_ranges.append((mid - half, mid + half))
+
             while True:
-                pos0 = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-                goal = np.array([self.np_random.uniform(*r) for r in self._ranges], dtype=np.float64)
-                dist = float(np.linalg.norm(pos0 - goal))
-                if dist > MIN_START_DISTANCE:
+                pos0 = np.array([self.np_random.uniform(*r) for r in spawn_ranges], dtype=np.float64)
+                # Check horizontal distance only for spawn validation
+                dist_xy = float(np.sqrt((pos0[0] - goal[0])**2 + (pos0[1] - goal[1])**2))
+                if dist_xy > MIN_START_DISTANCE:
                     break
 
         self.goal = goal
         self.goal_norm = self._normalise_position(self.goal).astype(np.float32)
 
         # Compute max possible distance for reward normalisation
+        # dim 2 and 3 both use horizontal distance only (altitude is not an objective)
         x_width = self.x_range[1] - self.x_range[0]
         y_width = self.y_range[1] - self.y_range[0]
         z_width = self.z_range[1] - self.z_range[0]
         if self.dim == 1:
             self._max_distance = z_width
-        elif self.dim == 2:
+        else:  # dim 2 and 3: horizontal only
             self._max_distance = float(np.sqrt(x_width**2 + y_width**2))
-        else:  # dim == 3
-            self._max_distance = float(np.sqrt(x_width**2 + y_width**2 + z_width**2))
 
         real_dim = 3 if self.dim == 2 else self.dim
         # For 2D mode, balloon is internally 3D with fixed altitude z0

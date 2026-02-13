@@ -1,10 +1,10 @@
 """Tests for reward functions."""
 
+import math
 import numpy as np
 import pytest
 
-from environments.core.reward import l2_distance, balloon_reward, _normalise_distance
-from environments.core.constants import ALT_MAX, XY_MAX
+from environments.core.reward import l2_distance, balloon_reward
 
 
 class TestL2Distance:
@@ -19,11 +19,10 @@ class TestL2Distance:
 
     def test_l2_distance_1d_uses_last_index(self):
         """1D should use last index of balloon_pos (for internal 3D representation)."""
-        # Even if balloon_pos has 3 elements, should use last one
         balloon_pos = np.array([100.0, 200.0, 1000.0])
         goal_pos = np.array([500.0])
         dist = l2_distance(balloon_pos, goal_pos, dim=1)
-        assert dist == pytest.approx(500.0)  # |1000 - 500|
+        assert dist == pytest.approx(500.0)
 
     def test_l2_distance_1d_symmetric(self):
         """1D distance should be symmetric."""
@@ -33,10 +32,10 @@ class TestL2Distance:
 
     def test_l2_distance_2d_simple(self):
         """2D distance should be Euclidean in x-y plane."""
-        balloon_pos = np.array([300.0, 400.0, 10000.0])  # 3D internally
+        balloon_pos = np.array([300.0, 400.0, 10000.0])
         goal_pos = np.array([0.0, 0.0])
         dist = l2_distance(balloon_pos, goal_pos, dim=2)
-        assert dist == pytest.approx(500.0)  # 3-4-5 triangle
+        assert dist == pytest.approx(500.0)
 
     def test_l2_distance_2d_ignores_z(self):
         """2D distance should ignore z component."""
@@ -45,13 +44,21 @@ class TestL2Distance:
         dist = l2_distance(balloon_pos, goal_pos, dim=2)
         assert dist == pytest.approx(500.0)
 
-    def test_l2_distance_3d_simple(self):
-        """3D distance should be full Euclidean norm."""
+    def test_l2_distance_3d_uses_xy_only(self):
+        """3D distance should use x,y only (altitude is not an objective)."""
         balloon_pos = np.array([100.0, 200.0, 300.0])
         goal_pos = np.array([400.0, 600.0, 900.0])
-        expected = np.linalg.norm(balloon_pos - goal_pos)
+        # Should ignore z component
+        expected = math.sqrt((100.0 - 400.0)**2 + (200.0 - 600.0)**2)
         dist = l2_distance(balloon_pos, goal_pos, dim=3)
         assert dist == pytest.approx(expected)
+
+    def test_l2_distance_3d_ignores_z(self):
+        """3D distance should be identical regardless of z values."""
+        pos_a = np.array([100.0, 200.0, 0.0])
+        pos_b = np.array([100.0, 200.0, 99999.0])
+        goal = np.array([400.0, 500.0, 5000.0])
+        assert l2_distance(pos_a, goal, 3) == pytest.approx(l2_distance(pos_b, goal, 3))
 
     def test_l2_distance_3d_symmetric(self):
         """3D distance should be symmetric."""
@@ -64,52 +71,29 @@ class TestL2Distance:
         for dim in [1, 2, 3]:
             if dim == 1:
                 pos = np.array([1000.0])
+                goal = pos.copy()
             else:
                 pos = np.array([100.0, 200.0, 300.0])
-            goal = pos[:dim].copy()
+                goal = pos.copy()  # same x,y (z ignored for dim 2/3)
             assert l2_distance(pos, goal, dim) == pytest.approx(0.0)
 
 
-class TestNormaliseDistance:
-    """Tests for distance normalization."""
-
-    def test_normalise_distance_zero(self):
-        """Zero distance should normalize to 0."""
-        assert _normalise_distance(0.0, ALT_MAX) == 0.0
-
-    def test_normalise_distance_negative(self):
-        """Normalized distance should be negative."""
-        assert _normalise_distance(1000.0, ALT_MAX) < 0
-
-    def test_normalise_distance_max(self):
-        """Maximum distance should normalize to approximately -1."""
-        norm = _normalise_distance(ALT_MAX, ALT_MAX)
-        assert norm == pytest.approx(-1.0)
-
-    def test_normalise_distance_range(self):
-        """Normalized distance should be in [-1, 0] for reasonable inputs."""
-        for d in [0, 1000, 5000, 10000, ALT_MAX]:
-            norm = _normalise_distance(d, ALT_MAX)
-            assert -1.0 <= norm <= 0.0
-
-
 class TestBalloonReward:
-    """Tests for the composite balloon_reward function."""
+    """Tests for the Perciatelli-style balloon_reward function."""
 
     @pytest.fixture
     def reward_kwargs(self):
-        """Default kwargs for balloon_reward."""
+        """Default kwargs for balloon_reward (unused params kept for signature compat)."""
         return dict(
-            punishment=-5.0,
-            prev_distance=1000.0,
-            max_distance=ALT_MAX,
-            success_radius=500.0,
-            success_outer_radius=1500.0,
-            success_speed=0.2,
-            direction_scale=0.05,
+            punishment=-100.0,
+            prev_distance=20000.0,
+            max_distance=100000.0,
+            station_radius=10000.0,
+            reward_dropoff=0.4,
+            reward_halflife=20000.0,
         )
 
-    def test_balloon_reward_returns_tuple(self, reward_kwargs):
+    def test_returns_tuple(self, reward_kwargs):
         """balloon_reward should return (total, components, new_distance)."""
         result = balloon_reward(
             balloon_pos=np.array([100.0]),
@@ -127,7 +111,7 @@ class TestBalloonReward:
         assert isinstance(components, dict)
         assert isinstance(new_dist, float)
 
-    def test_balloon_reward_components_present(self, reward_kwargs):
+    def test_components_present(self, reward_kwargs):
         """Reward components dict should contain expected keys."""
         _, components, _ = balloon_reward(
             balloon_pos=np.array([100.0]),
@@ -138,11 +122,10 @@ class TestBalloonReward:
             effect=0,
             **reward_kwargs,
         )
-        assert "distance" in components
-        assert "direction" in components
-        assert "reached" in components
+        assert "station" in components
+        assert "decay" in components
 
-    def test_balloon_reward_total_is_sum(self, reward_kwargs):
+    def test_total_is_sum(self, reward_kwargs):
         """Total reward should equal sum of components."""
         total, components, _ = balloon_reward(
             balloon_pos=np.array([500.0]),
@@ -156,9 +139,9 @@ class TestBalloonReward:
         expected = sum(components.values())
         assert total == pytest.approx(expected)
 
-    def test_balloon_reward_distance_component_negative(self, reward_kwargs):
-        """Distance component should be negative (further = worse)."""
-        _, components, _ = balloon_reward(
+    def test_inside_radius_gives_one(self, reward_kwargs):
+        """Inside station radius should give reward of 1.0."""
+        total, components, _ = balloon_reward(
             balloon_pos=np.array([5000.0]),
             goal_pos=np.array([0.0]),
             velocity=np.array([0.0]),
@@ -167,12 +150,15 @@ class TestBalloonReward:
             effect=0,
             **reward_kwargs,
         )
-        assert components["distance"] < 0
+        assert total == pytest.approx(1.0)
+        assert components["station"] == pytest.approx(1.0)
+        assert components["decay"] == pytest.approx(0.0)
 
-    def test_balloon_reward_closer_is_better(self, reward_kwargs):
-        """Closer position should give higher (less negative) distance reward."""
-        _, components_far, _ = balloon_reward(
-            balloon_pos=np.array([5000.0]),
+    def test_at_boundary_gives_dropoff(self, reward_kwargs):
+        """Exactly at station radius boundary should give reward_dropoff."""
+        # Place balloon just outside the radius
+        total, components, _ = balloon_reward(
+            balloon_pos=np.array([10001.0]),
             goal_pos=np.array([0.0]),
             velocity=np.array([0.0]),
             dim=1,
@@ -180,8 +166,13 @@ class TestBalloonReward:
             effect=0,
             **reward_kwargs,
         )
-        _, components_near, _ = balloon_reward(
-            balloon_pos=np.array([1000.0]),
+        assert total == pytest.approx(0.4, abs=0.01)
+
+    def test_decay_at_one_halflife(self, reward_kwargs):
+        """At one half-life past the radius, decay should be dropoff / 2."""
+        # station_radius=10000, halflife=20000 -> at distance 30000 (excess=20000)
+        total, _, _ = balloon_reward(
+            balloon_pos=np.array([30000.0]),
             goal_pos=np.array([0.0]),
             velocity=np.array([0.0]),
             dim=1,
@@ -189,111 +180,73 @@ class TestBalloonReward:
             effect=0,
             **reward_kwargs,
         )
-        assert components_near["distance"] > components_far["distance"]
+        assert total == pytest.approx(0.2, rel=1e-3)
 
-    def test_balloon_reward_direction_positive_when_approaching(self, reward_kwargs):
-        """Direction component should be positive when getting closer."""
-        _, components, _ = balloon_reward(
-            balloon_pos=np.array([800.0]),
+    def test_far_away_approaches_zero(self, reward_kwargs):
+        """Very far from goal should give reward near zero."""
+        total, _, _ = balloon_reward(
+            balloon_pos=np.array([500000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([-5.0]),  # Moving toward goal
-            dim=1,
-            terminated=False,
-            effect=0,
-            prev_distance=1000.0,  # Was further before
-            **{k: v for k, v in reward_kwargs.items() if k != "prev_distance"},
-        )
-        assert components["direction"] > 0
-
-    def test_balloon_reward_direction_negative_when_receding(self, reward_kwargs):
-        """Direction component should be negative when getting further."""
-        _, components, _ = balloon_reward(
-            balloon_pos=np.array([1200.0]),
-            goal_pos=np.array([0.0]),
-            velocity=np.array([5.0]),  # Moving away from goal
-            dim=1,
-            terminated=False,
-            effect=0,
-            prev_distance=1000.0,  # Was closer before
-            **{k: v for k, v in reward_kwargs.items() if k != "prev_distance"},
-        )
-        assert components["direction"] < 0
-
-    def test_balloon_reward_reached_full_bonus(self, reward_kwargs):
-        """Should get full reached bonus when near goal and slow."""
-        _, components, _ = balloon_reward(
-            balloon_pos=np.array([50.0]),  # Within success_radius (500)
-            goal_pos=np.array([0.0]),
-            velocity=np.array([0.1]),  # Below success_speed (0.2)
+            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
             effect=0,
             **reward_kwargs,
         )
-        assert components["reached"] == pytest.approx(0.3)
+        assert total < 0.001
 
-    def test_balloon_reward_reached_partial_in_outer_zone(self, reward_kwargs):
-        """Should get partial reached bonus in the outer ramp zone."""
-        _, components, _ = balloon_reward(
-            balloon_pos=np.array([1000.0]),  # Between outer (1500) and inner (500)
+    def test_closer_is_better(self, reward_kwargs):
+        """Closer position should give higher reward."""
+        total_far, _, _ = balloon_reward(
+            balloon_pos=np.array([50000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([10.0]),  # Speed doesn't matter in outer zone
+            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
             effect=0,
             **reward_kwargs,
         )
-        # At 1000m: proximity = (1500 - 1000) / (1500 - 500) = 0.5
-        assert components["reached"] == pytest.approx(0.15)
-
-    def test_balloon_reward_no_full_bonus_when_fast(self, reward_kwargs):
-        """Inside inner radius but fast should get proximity bonus, not full."""
-        _, components, _ = balloon_reward(
-            balloon_pos=np.array([50.0]),  # Within success_radius
+        total_near, _, _ = balloon_reward(
+            balloon_pos=np.array([15000.0]),
             goal_pos=np.array([0.0]),
-            velocity=np.array([10.0]),  # Above success_speed
+            velocity=np.array([0.0]),
             dim=1,
             terminated=False,
             effect=0,
             **reward_kwargs,
         )
-        # Gets proximity bonus (capped at 1.0) but not the full 0.3
-        # proximity = (1500 - 50) / (1500 - 500) = 1.45 -> capped to 1.0
-        # reached = 0.3 * 1.0 = 0.3, but speed gate prevents full bonus override
-        # Actually since proximity is capped at 1.0, it's 0.3 * 1.0 = 0.3
-        # The full bonus override only triggers when BOTH conditions met
-        assert components["reached"] == pytest.approx(0.3)
+        assert total_near > total_far
 
-    def test_balloon_reward_no_reached_bonus_when_far(self, reward_kwargs):
-        """Should not get reached bonus when outside outer radius."""
-        _, components, _ = balloon_reward(
-            balloon_pos=np.array([2000.0]),  # Outside success_outer_radius (1500)
-            goal_pos=np.array([0.0]),
-            velocity=np.array([0.1]),  # Slow
-            dim=1,
-            terminated=False,
-            effect=0,
-            **reward_kwargs,
-        )
-        assert components["reached"] == 0.0
+    def test_reward_range_zero_to_one(self, reward_kwargs):
+        """Reward should always be in [0, 1]."""
+        for dist in [0, 500, 5000, 10000, 20000, 50000, 200000]:
+            total, _, _ = balloon_reward(
+                balloon_pos=np.array([float(dist)]),
+                goal_pos=np.array([0.0]),
+                velocity=np.array([0.0]),
+                dim=1,
+                terminated=False,
+                effect=0,
+                **reward_kwargs,
+            )
+            assert 0.0 <= total <= 1.0
 
-    def test_balloon_reward_termination_punishment(self, reward_kwargs):
-        """Terminated episode should return punishment as total reward."""
+    def test_terminated_gives_zero(self, reward_kwargs):
+        """Terminated episode should return 0.0 reward."""
         total, components, _ = balloon_reward(
             balloon_pos=np.array([0.0]),
             goal_pos=np.array([1000.0]),
             velocity=np.array([0.0]),
             dim=1,
-            terminated=True,  # Crashed!
+            terminated=True,
             effect=0,
             **reward_kwargs,
         )
-        assert total == reward_kwargs["punishment"]
-        assert components["distance"] == reward_kwargs["punishment"]
-        assert components["direction"] == 0.0
-        assert components["reached"] == 0.0
+        assert total == 0.0
+        assert components["station"] == 0.0
+        assert components["decay"] == 0.0
 
-    def test_balloon_reward_updates_distance(self, reward_kwargs):
+    def test_updates_distance(self, reward_kwargs):
         """Returned distance should match current position."""
         pos = np.array([750.0])
         goal = np.array([0.0])
@@ -309,7 +262,7 @@ class TestBalloonReward:
         expected_dist = l2_distance(pos, goal, dim=1)
         assert new_dist == pytest.approx(expected_dist)
 
-    def test_balloon_reward_multidimensional(self, reward_kwargs):
+    def test_multidimensional(self, reward_kwargs):
         """Reward should work for all dimensions."""
         for dim in [1, 2, 3]:
             if dim == 1:

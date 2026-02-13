@@ -12,7 +12,8 @@ trilinear interpolation.  Patterns currently supported:
     • "altitude_shear"    - east/west wind based on altitude (3D)
                            west wind below midpoint, east wind above
     • "altitude_shear_2d" - wind direction rotates with altitude (3D)
-                           N→E→S→W over the full altitude range
+                           N→E→S→W, repeating `wind_layers` times over
+                           the full altitude range (default 2)
 
 Extend `_build_grid()` to add more patterns.
 """
@@ -39,10 +40,12 @@ class WindField:
         pattern: str = "sinusoid",
         default_mag: float = 10.0,
         wind_cfg_path: str | Path | None = None,
+        wind_layers: int = 2,
     ):
         self.x_range, self.y_range, self.z_range = x_range, y_range, z_range
         self.cells = cells
         self.pattern = pattern
+        self.wind_layers = wind_layers
 
         # --- magnitude -----------------------------------------------------
         self.mag = default_mag
@@ -159,10 +162,10 @@ class WindField:
             self._fy_grid = np.zeros_like(Y)
 
         elif self.pattern == "altitude_shear_2d":
-            # Wind direction rotates smoothly with altitude:
-            # bottom=north, quarter=east, mid=south, three-quarter=west
+            # Wind direction rotates smoothly with altitude,
+            # repeating `wind_layers` full rotations over the altitude range.
             Zn = (Z - zr[0]) / (zr[1] - zr[0])
-            theta = 2.0 * np.pi * Zn
+            theta = 2.0 * np.pi * self.wind_layers * Zn
             self._fx_grid = mag * np.sin(theta)
             self._fy_grid = mag * np.cos(theta)
 

@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      torch-ecosystem:
+        patterns: ["torch", "triton", "nvidia-*"]
+      ml-stack:
+        patterns: ["stable-baselines3", "sb3-contrib", "gymnasium"]
+      python-deps:
+        patterns: ["*"]
+        exclude-patterns: ["torch", "triton", "nvidia-*", "stable-baselines3", "sb3-contrib", "gymnasium"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "nvidia-*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
