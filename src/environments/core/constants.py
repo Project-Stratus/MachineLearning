@@ -81,5 +81,12 @@ SPEED_EPS = 1e-12           # Speed threshold for drag computation (m/s²)
 # ----- RESET CONSTANTS -----
 MIN_START_DISTANCE = 500.0  # Minimum distance between start and goal on reset (m)
 
+# ----- INITIAL CONDITION RANDOMISATION -----
+# Domain randomisation of initial conditions for robustness.
+# Simulates the variability a balloon experiences after reaching float altitude.
+INIT_VEL_SIGMA = 2.0       # Std dev of initial velocity perturbation (m/s)
+INIT_GAS_FRAC_RANGE = 0.05 # Max fractional deviation from neutral gas amount (±5%)
+INIT_BALLAST_LOSS_MAX = 0.5 # Max ballast (kg) that may have been spent during ascent
+
 # ----- CODE CONSTANTS -----
 SEED = 42                    # Random seed for reproducibility

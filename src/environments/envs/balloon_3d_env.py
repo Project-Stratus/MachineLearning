@@ -93,6 +93,7 @@ from environments.core.constants import (
     P0, M_AIR, G, RHO_0,
     BALLAST_DROP, VENT_RATE,
     MIN_START_DISTANCE,
+    INIT_VEL_SIGMA, INIT_GAS_FRAC_RANGE, INIT_BALLAST_LOSS_MAX,
 )
 
 _JIT_WARMED = False  # whether numba JIT has been warmed up
@@ -383,6 +384,23 @@ class Balloon3DEnv(gym.Env):
                                 position=init_pos,
                                 velocity=[0.0] * real_dim,
                                 )
+
+        # --- Domain randomisation of initial conditions ---
+        # Simulates variability after reaching float altitude: turbulence,
+        # imprecise inflation, and ballast spent during ascent.
+        # 1. Initial velocity perturbation (turbulence at float arrival)
+        init_vel = self.np_random.normal(0.0, INIT_VEL_SIGMA, size=real_dim)
+        if self.dim == 2:
+            init_vel[2] = 0.0  # no vertical velocity in 2D mode
+        self._balloon.vel[:] = init_vel
+
+        # 2. Gas imbalance (±INIT_GAS_FRAC_RANGE of neutral amount)
+        gas_frac = self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE)
+        self._balloon.n_gas *= (1.0 + gas_frac)
+
+        # 3. Ballast variation (some ballast may have been spent during ascent)
+        ballast_loss = self.np_random.uniform(0.0, INIT_BALLAST_LOSS_MAX)
+        self._balloon.ballast_mass = max(0.0, self._balloon.ballast_mass - ballast_loss)
 
         observation = self._get_obs()
         info = self._get_info()
