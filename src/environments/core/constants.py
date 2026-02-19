@@ -18,7 +18,11 @@ XY_MAX = 50_000.0           # Maximum horizontal operating distance from origin 
 DT = 1.0                    # Time step (s)
 
 # ----- BALLOON CONSTANTS -----
-MASS = 2.0                  # Balloon mass (kg)
+PAYLOAD_MASS = 2.0          # Fixed structural mass: envelope + gondola + electronics (kg)
+BALLAST_INITIAL = 5.0       # Expendable ballast mass at launch (kg)
+BALLAST_DROP = 0.02         # Ballast mass dropped per "drop" action (kg)
+VENT_RATE = 0.19            # Gas volume equivalent vented per "vent" action (m³)
+MASS = PAYLOAD_MASS + BALLAST_INITIAL  # Total structural mass (kg), used for ALT_MAX derivation
 VOL_MAX = 180.6             # Maximum balloon volume (m³) — gives ALT_MAX ≈ 40 km
 VOL_MIN = 0.1               # Minimum volume before deflation (m³)
 M_HE = 0.004002602          # Molar mass of helium (kg/mol)

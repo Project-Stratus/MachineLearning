@@ -221,34 +221,33 @@ class TestBalloon3DEnvActions:
     def test_action_lut_mapping(self, env_any_dim):
         """Action LUT should map indices to effects correctly."""
         env, _ = env_any_dim
-        assert env._action_lut[0] == -1  # deflate
+        assert env._action_lut[0] == -1  # vent
         assert env._action_lut[1] == 0   # nothing
-        assert env._action_lut[2] == 1   # inflate
+        assert env._action_lut[2] == 1   # drop ballast
 
-    def test_action_inflate_increases_volume(self, env_1d):
-        """Inflate action should increase balloon volume."""
+    def test_action_drop_ballast_reduces_mass(self, env_1d):
+        """Drop ballast action should reduce balloon mass."""
+        env_1d.reset(seed=42)
+        mass_before = env_1d._balloon.mass
+        env_1d.step(2)  # Action 2 = drop ballast
+        mass_after = env_1d._balloon.mass
+        assert mass_after < mass_before
+
+    def test_action_vent_decreases_volume(self, env_1d):
+        """Vent action should decrease balloon volume."""
         env_1d.reset(seed=42)
         vol_before = env_1d._balloon.volume
-        env_1d.step(2)  # Action 2 = inflate
-        vol_after = env_1d._balloon.volume
-        assert vol_after > vol_before
-
-    def test_action_deflate_decreases_volume(self, env_1d):
-        """Deflate action should decrease balloon volume."""
-        env_1d.reset(seed=42)
-        env_1d.step(2)  # First inflate to have some extra volume
-        vol_before = env_1d._balloon.volume
-        env_1d.step(0)  # Action 0 = deflate
+        env_1d.step(0)  # Action 0 = vent gas
         vol_after = env_1d._balloon.volume
         assert vol_after < vol_before
 
-    def test_action_nothing_no_volume_change(self, env_1d):
-        """Nothing action should not change volume."""
+    def test_action_nothing_no_mass_change(self, env_1d):
+        """Nothing action should not change mass."""
         env_1d.reset(seed=42)
-        vol_before = env_1d._balloon.volume
+        mass_before = env_1d._balloon.mass
         env_1d.step(1)  # Action 1 = nothing
-        vol_after = env_1d._balloon.volume
-        assert vol_after == pytest.approx(vol_before)
+        mass_after = env_1d._balloon.mass
+        assert mass_after == pytest.approx(mass_before)
 
     def test_all_actions_valid(self, env_any_dim):
         """All actions should be executable without error."""
@@ -367,12 +366,12 @@ class TestActionsEnum:
 
     def test_actions_enum_values(self):
         """Actions enum should have correct effect values."""
-        assert Actions.inflate.value == 1
+        assert Actions.drop_ballast.value == 1
         assert Actions.nothing.value == 0
-        assert Actions.deflate.value == -1
+        assert Actions.vent.value == -1
 
     def test_actions_enum_lookup(self):
         """Should be able to look up action by effect value."""
-        assert Actions(1) == Actions.inflate
+        assert Actions(1) == Actions.drop_ballast
         assert Actions(0) == Actions.nothing
-        assert Actions(-1) == Actions.deflate
+        assert Actions(-1) == Actions.vent

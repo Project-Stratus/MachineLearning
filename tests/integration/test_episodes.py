@@ -108,47 +108,44 @@ class TestPhysicsConsistency:
     """Tests for physics consistency during episodes."""
 
     @pytest.mark.integration
-    def test_inflate_causes_rise_1d(self):
-        """Consistent inflating should cause balloon to rise in 1D."""
-        env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 100})
+    def test_drop_ballast_causes_rise_1d(self):
+        """Dropping ballast repeatedly should cause balloon to rise in 1D."""
+        env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 200})
         try:
             env.reset(seed=42)
             initial_alt = env._balloon.altitude
 
-            # Inflate repeatedly
-            for _ in range(20):
-                env.step(2)  # Inflate
+            # Drop ballast repeatedly — need enough drops to overcome gas mass
+            # deficit and the downward momentum from sinking while still heavy
+            for _ in range(100):
+                env.step(2)  # Drop ballast
 
             final_alt = env._balloon.altitude
-            assert final_alt > initial_alt, "Balloon should rise when inflating"
+            assert final_alt > initial_alt, "Balloon should rise when dropping ballast"
         finally:
             env.close()
 
     @pytest.mark.integration
-    def test_deflate_causes_fall_1d(self):
-        """Consistent deflating should eventually cause balloon to fall in 1D."""
+    def test_vent_causes_fall_1d(self):
+        """Venting gas repeatedly should eventually cause balloon to fall in 1D."""
         env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 200})
         try:
             env.reset(seed=42)
-            # Start at a known altitude with neutral buoyancy
             initial_alt = env._balloon.altitude
 
-            # Deflate many times to create negative buoyancy
+            # Vent gas many times to reduce buoyancy
             for _ in range(50):
-                env.step(0)  # Deflate
+                env.step(0)  # Vent gas
 
-            # The balloon should have less volume and thus less buoyancy
-            # It might take time to actually fall due to momentum
             final_alt = env._balloon.altitude
             final_extra_vol = env._balloon.extra_volume
 
-            # At minimum, the extra volume should be negative (deflated)
-            assert final_extra_vol < 0, "Deflating should reduce extra volume"
+            # At minimum, the extra volume should be negative (gas vented)
+            assert final_extra_vol < 0, "Venting should reduce extra volume"
 
             # The balloon should eventually be falling or have fallen
-            # (allow for cases where drag slows it significantly)
             assert final_alt < initial_alt or env._balloon.vel[0] < 0, \
-                "Balloon should fall or be falling when deflated"
+                "Balloon should fall or be falling when gas is vented"
         finally:
             env.close()
 
@@ -222,9 +219,9 @@ class TestRewardConsistency:
 
             # Choose action to move toward goal
             if goal_z > balloon_z:
-                action = 2  # Inflate to rise
+                action = 2  # Drop ballast to rise
             else:
-                action = 0  # Deflate to fall
+                action = 0  # Vent gas to fall
 
             rewards = []
             for _ in range(30):
@@ -252,7 +249,7 @@ class TestRewardConsistency:
             env.reset(seed=42)
 
             # Make balloon heavy so gravity overwhelms buoyancy, causing a crash
-            env._balloon.mass = 1000.0
+            env._balloon.payload_mass = 1000.0
             env._balloon.pos[0] = 10.0
             env._balloon.vel[0] = -5.0
 
@@ -368,7 +365,7 @@ class TestEdgeCases:
         try:
             env.reset(seed=42)
 
-            # Rapidly alternate between inflate and deflate
+            # Rapidly alternate between drop ballast and vent
             for i in range(50):
                 action = 2 if i % 2 == 0 else 0
                 obs, reward, term, _, _ = env.step(action)

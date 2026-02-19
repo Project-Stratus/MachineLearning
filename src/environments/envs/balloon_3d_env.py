@@ -23,12 +23,13 @@ Action space
 Discrete(3) with action indices 0, 1, 2 mapped to effects:
 
     Index | Effect | Description
-    ------|--------|---------------------------
-      0   |   -1   | Deflate (decrease volume)
+    ------|--------|--------------------------------------
+      0   |   -1   | Vent gas (release helium → descend)
       1   |    0   | Do nothing
-      2   |   +1   | Inflate (increase volume)
+      2   |   +1   | Drop ballast (reduce weight → ascend)
 
-The mapping is defined in `_action_lut`.
+Both actions are irreversible: vented helium and dropped ballast
+cannot be recovered.  The mapping is defined in `_action_lut`.
 
 =========
 Observation space
@@ -56,6 +57,7 @@ Termination occurs when:
 + Balloon altitude ≤ 0 m (crash).
 + Balloon altitude ≥ altitude ceiling (pop).
 + Balloon fully deflated (helium loss).
++ Ballast exhausted (no ballast remaining).
 + Balloon exits XY bounds (2D/3D only).
 + Time limit reached (default 5000 steps).
 
@@ -89,6 +91,7 @@ from environments.render.pygame_render import PygameRenderer
 from environments.core.constants import (
     VOL_MAX, ALT_MAX, XY_MAX, VEL_MAX, P_MAX, DT,
     P0, M_AIR, G, RHO_0,
+    BALLAST_DROP, VENT_RATE,
     MIN_START_DISTANCE,
 )
 
@@ -96,10 +99,15 @@ _JIT_WARMED = False  # whether numba JIT has been warmed up
 
 
 class Actions(Enum):
-    """Effect values for balloon volume control (not action indices)."""
-    inflate = 1
+    """Effect values for balloon altitude control (not action indices).
+
+    drop_ballast (+1): drop expendable ballast to reduce weight → ascend.
+    nothing      ( 0): take no action.
+    vent         (-1): vent helium to reduce buoyancy → descend.
+    """
+    drop_ballast = 1
     nothing = 0
-    deflate = -1
+    vent = -1
 
 
 class Balloon3DEnv(gym.Env):
@@ -116,7 +124,7 @@ class Balloon3DEnv(gym.Env):
         z_range=(0.0, ALT_MAX),
         wind_mag=5.0,            # max wind speed [m/s]
         wind_cells=20,           # grid for wind visualisation
-        inflate_rate=0.5,        # Δvolume per *inflate* action
+        vent_rate=VENT_RATE,      # gas volume equivalent vented per *vent* action (m³)
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
         wind_layers=2,                # number of full wind rotations over altitude range (altitude_shear_2d only)
@@ -196,8 +204,8 @@ class Balloon3DEnv(gym.Env):
         self._obs_buf = np.empty(self._obs_size, dtype=np.float32)
         self._inv_wind_mag = 1.0 / cfg["wind_mag"]
         self.goal_norm = None
-        self.action_space = spaces.Discrete(3)      # inflate, deflate and nothing. Creates idx values 0,1,2
-        self._action_lut = np.array([-1, 0, 1])     # map action index to effect on volume (0->-1, 1->0, 2->+1)
+        self.action_space = spaces.Discrete(3)      # vent, nothing, drop ballast. Creates idx values 0,1,2
+        self._action_lut = np.array([-1, 0, 1])     # map action index to effect (0->vent, 1->nothing, 2->drop ballast)
 
         # ------------------------------------------------------------------
         # Runtime state containers
@@ -431,11 +439,13 @@ class Balloon3DEnv(gym.Env):
     def step(self, action: int):
         assert self._balloon is not None, "Call reset() first."
 
-        # Map action index (0,1,2) to effect (-1,0,+1) via lookup table
+        # Map action index to balloon control
         effect = int(self._action_lut[action])
 
-        if effect:
-            self._balloon.inflate(effect * self.cfg["inflate_rate"])    # -1, 0, +1 * rate
+        if effect == 1:       # drop ballast → ascend
+            self._balloon.drop_ballast(BALLAST_DROP)
+        elif effect == -1:    # vent gas → descend
+            self._balloon.vent_gas(self.cfg["vent_rate"])
 
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
         self.last_wind[:] = wind    # Cache for obs (copies before buffer reuse)
@@ -471,6 +481,7 @@ class Balloon3DEnv(gym.Env):
         crashed = (self.dim in (1, 3)) and self._balloon.pos[-1] <= 0.0
         popped = (self.dim in (1, 3)) and self._balloon.pos[-1] >= self.z_range[1]
         deflated = self._balloon.is_deflated
+        ballast_empty = self._balloon.is_ballast_empty
         out_of_bounds = False
         if self.dim in (2, 3):
             x, y = self._balloon.pos[0], self._balloon.pos[1]
@@ -478,7 +489,7 @@ class Balloon3DEnv(gym.Env):
                 x <= self.x_range[0] or x >= self.x_range[1]
                 or y <= self.y_range[0] or y >= self.y_range[1]
             )
-        terminated = crashed or popped or deflated or out_of_bounds
+        terminated = crashed or popped or deflated or ballast_empty or out_of_bounds
         self.truncated = self._time >= self.cfg["time_max"]
 
         reward_total, reward_components, self._prev_distance = balloon_reward(
@@ -509,6 +520,8 @@ class Balloon3DEnv(gym.Env):
                 info["termination_reason"] = "Popped (altitude limit exceeded)"
             elif deflated:
                 info["termination_reason"] = "Deflated (helium fully lost)"
+            elif ballast_empty:
+                info["termination_reason"] = "Ballast exhausted (no ballast remaining)"
             elif out_of_bounds:
                 info["termination_reason"] = "Out of bounds (XY limit exceeded)"
 

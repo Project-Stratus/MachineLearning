@@ -3,7 +3,7 @@
 - [x] Volume-dependent cross-sectional area and drag coefficient: frontal area derived from sphere geometry, CD from Morrison (2013) Reynolds-number correlation. Includes Sutherland's law for dynamic viscosity.
 - [x] Upgrade integrator from forward Euler to velocity Verlet (symplectic, second-order). Two force evaluations per step with density recomputed at the updated position. Better energy conservation and stability at DT=1.0s.
 - [x] Passive gas expansion/compression with altitude: balloon tracks gas moles, volume derived via ideal gas law (V = nRT/P). Gas expands/compresses automatically with altitude changes.
-- [ ] Variable balloon mass: `MASS = 2.0` is constant. Real balloons lose mass through gas venting/leakage and ballast drops. Relevant if the action space is eventually expanded to include gas management.
+- [x] Variable balloon mass: total mass = payload + ballast + gas (n_gas × M_HE). Actions swapped from inflate/deflate to drop ballast (ascend) and vent gas (descend) — both irreversible. `mass` is now a property recomputed each step.
 
 ## Training performance
 - [ ] (Low priority) Increase `train_freq` (currently 4) to 8-16 to reduce gradient updates per env step. Trades sample efficiency for wall-clock speed — not worth doing unless training time becomes a bottleneck again, since GPU and vectorised envs already address the main performance issues.

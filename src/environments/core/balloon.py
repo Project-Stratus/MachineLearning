@@ -3,7 +3,8 @@ import numpy as np
 
 from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    G, R, VOL_MAX, VOL_MIN, VEL_MAX, MASS, M_HE, T_BALLOON,
+    G, R, VOL_MAX, VOL_MIN, VEL_MAX, M_HE, T_BALLOON,
+    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE,
     ALT_DEFAULT, OSCILLATION_AMP, OSCILLATION_PERIOD, SPEED_EPS,
     MU_REF, T_REF, S_SUTH,
 )
@@ -24,13 +25,23 @@ class Balloon:
     """
     Unified balloon model for 1-D, 2-D and 3-D Gym environments.
 
+    Mass model
+    ----------
+    Total mass is the sum of three components tracked separately:
+    - **payload_mass**: fixed structural mass (envelope, gondola, electronics).
+    - **ballast_mass**: expendable ballast that can be dropped to ascend.
+    - **gas mass**: ``n_gas * M_HE``, changes when gas is vented.
+
+    The ``mass`` property returns the current total.  Both ballast drops
+    and gas venting are irreversible — once resources are spent they cannot
+    be recovered.
+
     Gas tracking
     ------------
     Internal state tracks moles of helium (`self.n_gas`).  Volume is derived
     each step via the ideal gas law: V = n * R * T_balloon / P_ambient.
     As the balloon ascends, ambient pressure drops and volume grows
-    automatically (passive expansion).  Agent inflate/deflate actions add or
-    remove moles.
+    automatically (passive expansion).  The agent vents gas to descend.
 
     Drag model
     ----------
@@ -48,14 +59,16 @@ class Balloon:
     def __init__(
         self,
         dim: int = 1,
-        mass: float = MASS,
+        payload_mass: float = PAYLOAD_MASS,
+        ballast_initial: float = BALLAST_INITIAL,
         position=None,
         velocity=None,
         atmosphere: Atmosphere | None = None,
         oscillate: bool = False,
     ):
         self.dim = dim
-        self.mass = mass
+        self.payload_mass = payload_mass
+        self.ballast_mass = ballast_initial
         self.atmosphere = atmosphere if atmosphere is not None else Atmosphere()
 
         # State ----------------------------------------------------------------
@@ -74,9 +87,16 @@ class Balloon:
         alt = self.pos[-1]
         p_amb = self.atmosphere.pressure(alt)
         rho_air = self.atmosphere.density(alt)
-        self.stationary_volume = self.mass / rho_air
+        structural_mass = self.payload_mass + self.ballast_mass
+        self.stationary_volume = structural_mass / rho_air
         self.n_gas = p_amb * self.stationary_volume / (R * T_BALLOON)
         self.oscillate = oscillate
+
+    # -- Variable mass --------------------------------------------------------
+    @property
+    def mass(self) -> float:
+        """Total mass: payload + ballast + helium gas."""
+        return self.payload_mass + self.ballast_mass + self.n_gas * M_HE
 
     # -- Volume from gas law --------------------------------------------------
     def _gas_law_volume(self) -> float:
@@ -145,20 +165,36 @@ class Balloon:
         """Difference between current gas-law volume and stationary volume."""
         return self._gas_law_volume() - self.stationary_volume
 
-    def apply_volume_change(self, delta: float) -> None:
-        """Add/remove gas to change volume by approximately *delta* m³."""
+    def drop_ballast(self, amount: float = BALLAST_DROP) -> None:
+        """Drop expendable ballast to reduce weight (irreversible)."""
+        self.ballast_mass = max(0.0, self.ballast_mass - amount)
+
+    def vent_gas(self, volume_equiv: float = VENT_RATE) -> None:
+        """Vent helium to reduce buoyancy (irreversible).
+
+        *volume_equiv* is the volume of gas (m³) to remove at the current
+        ambient pressure.  Internally converted to moles via the ideal gas law.
+        """
         p_amb = self.atmosphere.pressure(self.pos[-1])
-        dn = p_amb * delta / (R * T_BALLOON)
-        self.n_gas += dn
+        dn = p_amb * volume_equiv / (R * T_BALLOON)
+        self.n_gas = max(0.0, self.n_gas - dn)
 
     def inflate(self, delta: float) -> None:
-        """Alias kept for env compatibility."""
-        self.apply_volume_change(delta)
+        """Legacy helper — positive delta drops ballast, negative vents gas."""
+        if delta > 0:
+            self.drop_ballast(BALLAST_DROP)
+        elif delta < 0:
+            self.vent_gas(abs(delta))
 
     @property
     def is_deflated(self) -> bool:
         """True if balloon has lost too much volume (helium released)."""
         return self.volume <= VOL_MIN
+
+    @property
+    def is_ballast_empty(self) -> bool:
+        """True when all expendable ballast has been dropped."""
+        return self.ballast_mass <= 0.0
 
     # -------------------------------------------------------------------------
     # Core physics helpers
