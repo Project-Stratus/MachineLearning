@@ -46,19 +46,16 @@ class TestBalloonInitialization:
         assert balloon.vy == 2.0
         assert balloon.velocity == 3.0
 
-    def test_initial_volume_matches_structural_mass(self, atmosphere):
-        """Initial volume should equal structural_mass / rho_air.
+    def test_initial_volume_gives_neutral_buoyancy(self, atmosphere):
+        """Initial volume should give true neutral buoyancy including gas mass.
 
-        The balloon starts at neutral buoyancy for its structural mass
-        (payload + ballast).  The gas itself has mass (n_gas * M_HE),
-        so the total mass is slightly above neutral — this is physically
-        correct and means the balloon initially sinks very slowly.
+        The balloon starts so that rho_air * V = total_mass (payload +
+        ballast + helium).  This means net vertical force is zero at launch.
         """
         balloon = Balloon(dim=1, atmosphere=atmosphere, position=[15_000.0])
         rho_air = atmosphere.density(15_000.0)
-        structural_mass = balloon.payload_mass + balloon.ballast_mass
-        expected_volume = structural_mass / rho_air
-        assert balloon.volume == pytest.approx(expected_volume, rel=1e-4)
+        buoyancy = rho_air * balloon.volume
+        assert buoyancy == pytest.approx(balloon.mass, rel=1e-4)
 
     def test_initial_gas_moles_consistent(self, atmosphere):
         """Initial n_gas should satisfy V = nRT/P at the starting altitude."""
@@ -241,16 +238,11 @@ class TestBalloonForces:
         assert weight[-1] == pytest.approx(expected)
 
     def test_near_neutral_buoyancy_at_initial_volume(self, atmosphere):
-        """At initial volume, buoyancy should approximately balance structural weight.
-
-        The balloon is slightly heavier than neutral because gas has mass
-        (n_gas * M_HE), but buoyancy should match the structural mass
-        (payload + ballast) contribution.
-        """
+        """At initial volume, buoyancy should balance total weight (including gas mass)."""
         balloon = Balloon(dim=1, atmosphere=atmosphere, position=[15_000.0])
         buoy = balloon.buoyant_force(0.0)[-1]
-        structural_weight = (balloon.payload_mass + balloon.ballast_mass) * G
-        assert buoy == pytest.approx(structural_weight, rel=0.01)
+        total_weight = balloon.mass * G
+        assert buoy == pytest.approx(total_weight, rel=1e-4)
 
     def test_dropping_ballast_reduces_weight(self, balloon_1d):
         """Dropping ballast should reduce weight magnitude."""

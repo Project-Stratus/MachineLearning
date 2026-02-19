@@ -84,12 +84,17 @@ class Balloon:
         self.t = 0.0
 
         # Gas state ------------------------------------------------------------
+        # Solve for true neutral buoyancy including helium mass.
+        # Simultaneous equations:
+        #   rho_air * V = structural_mass + n_gas * M_HE   (force balance)
+        #   V = n_gas * R * T_BALLOON / P_amb              (ideal gas law)
+        # Solving: n_gas = structural_mass / (rho_air * R * T_BALLOON / P_amb - M_HE)
         alt = self.pos[-1]
         p_amb = self.atmosphere.pressure(alt)
         rho_air = self.atmosphere.density(alt)
         structural_mass = self.payload_mass + self.ballast_mass
-        self.stationary_volume = structural_mass / rho_air
-        self.n_gas = p_amb * self.stationary_volume / (R * T_BALLOON)
+        self.n_gas = structural_mass / (rho_air * R * T_BALLOON / p_amb - M_HE)
+        self.stationary_volume = self.n_gas * R * T_BALLOON / p_amb
         self.oscillate = oscillate
 
     # -- Variable mass --------------------------------------------------------

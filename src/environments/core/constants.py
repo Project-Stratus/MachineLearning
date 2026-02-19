@@ -38,25 +38,40 @@ S_SUTH = 110.4              # Sutherland's constant for air (K)
 # Sea-level air density via ideal gas law
 RHO_0 = P0 * M_AIR / (R * T0)  # ≈ 1.225 kg/m³
 
-# Altitude ceiling — computed from ISA pressure model.
-# Balloon pops when neutral-buoyancy volume = VOL_MAX, i.e. MASS / rho_air = VOL_MAX.
-# We solve for the altitude where rho_air = MASS / VOL_MAX using the ISA model.
-# In the troposphere: rho(h) = rho0 * (1 - L*h/T0)^(g*M/(R*L) - 1)
-_EXP_TROPO = G * M_AIR / (R * LAPSE_RATE) - 1.0
-_RHO_TARGET = MASS / VOL_MAX
-_RHO_RATIO = _RHO_TARGET / RHO_0
+# Altitude ceiling — where balloon at VOL_MAX reaches neutral buoyancy.
+# Accounts for helium gas mass:
+#   rho_air * VOL_MAX = MASS + P * VOL_MAX * M_HE / (R * T_BALLOON)
+# Rearranged: rho_eff(h) = rho_air - P * M_HE / (R * T_BALLOON) = MASS / VOL_MAX
+_GM_RL = G * M_AIR / (R * LAPSE_RATE)
+_EXP_TROPO = _GM_RL - 1.0
+_MASS_OVER_VOL = MASS / VOL_MAX
 
-# Check if target density falls within troposphere
-_RHO_TROPOPAUSE = RHO_0 * (1.0 - LAPSE_RATE * TROPOPAUSE_ALT / T0) ** _EXP_TROPO
-if _RHO_TARGET >= _RHO_TROPOPAUSE:
-    # Target altitude is in the troposphere
-    ALT_MAX = (T0 / LAPSE_RATE) * (1.0 - _RHO_RATIO ** (1.0 / _EXP_TROPO))
+# Tropopause reference values
+_P_TROPO = P0 * (T_TROPOPAUSE / T0) ** _GM_RL
+_RHO_TROPO = _P_TROPO * M_AIR / (R * T_TROPOPAUSE)
+_RHO_EFF_TROPO = _RHO_TROPO - _P_TROPO * M_HE / (R * T_BALLOON)
+
+if _MASS_OVER_VOL >= _RHO_EFF_TROPO:
+    # Target altitude is in the troposphere (unlikely with current params).
+    # Bisection: rho_eff(h) has no closed form when T varies with h.
+    _lo, _hi = 0.0, TROPOPAUSE_ALT
+    for _ in range(60):
+        _mid = 0.5 * (_lo + _hi)
+        _T = T0 - LAPSE_RATE * _mid
+        _P = P0 * (_T / T0) ** _GM_RL
+        _rho_eff = _P * M_AIR / (R * _T) - _P * M_HE / (R * T_BALLOON)
+        if _rho_eff > _MASS_OVER_VOL:
+            _lo = _mid
+        else:
+            _hi = _mid
+    ALT_MAX = 0.5 * (_lo + _hi)
 else:
-    # Target altitude is in the stratosphere
-    _P_TROPO = P0 * (T_TROPOPAUSE / T0) ** (G * M_AIR / (R * LAPSE_RATE))
-    _RHO_TROPO_EXACT = _P_TROPO * M_AIR / (R * T_TROPOPAUSE)
+    # Target altitude is in the stratosphere (T = T_TROPOPAUSE = const).
+    # Analytical: P_target = (MASS/VOL_MAX) / (M_AIR/(R*T_tropo) - M_HE/(R*T_balloon))
     _SCALE_H_STRATO = R * T_TROPOPAUSE / (M_AIR * G)
-    ALT_MAX = TROPOPAUSE_ALT + _SCALE_H_STRATO * np.log(_RHO_TROPO_EXACT / _RHO_TARGET)
+    _K = M_AIR / (R * T_TROPOPAUSE) - M_HE / (R * T_BALLOON)
+    _P_TARGET = _MASS_OVER_VOL / _K
+    ALT_MAX = TROPOPAUSE_ALT + _SCALE_H_STRATO * np.log(_P_TROPO / _P_TARGET)
 
 ALT_DEFAULT = 0.5 * ALT_MAX  # Default starting altitude (m) — midpoint of operating range
 VEL_MAX = 200.0             # Maximum velocity (m/s) - physics clamp limit

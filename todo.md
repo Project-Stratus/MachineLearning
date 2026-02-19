@@ -1,9 +1,8 @@
-- [x] Unify drag model to use relative velocity: drag proportional to `(balloon_vel - wind_vel)^2`. Wind passed as velocity vector, not force. Balloon drifting with wind experiences zero drag.
-- [x] Altitude-dependent temperature model: ISA lapse rate (6.5 K/km troposphere, constant stratosphere). Pressure uses barometric formula. Density, buoyancy, and drag all altitude-aware.
-- [x] Volume-dependent cross-sectional area and drag coefficient: frontal area derived from sphere geometry, CD from Morrison (2013) Reynolds-number correlation. Includes Sutherland's law for dynamic viscosity.
-- [x] Upgrade integrator from forward Euler to velocity Verlet (symplectic, second-order). Two force evaluations per step with density recomputed at the updated position. Better energy conservation and stability at DT=1.0s.
-- [x] Passive gas expansion/compression with altitude: balloon tracks gas moles, volume derived via ideal gas law (V = nRT/P). Gas expands/compresses automatically with altitude changes.
-- [x] Variable balloon mass: total mass = payload + ballast + gas (n_gas × M_HE). Actions swapped from inflate/deflate to drop ballast (ascend) and vent gas (descend) — both irreversible. `mass` is now a property recomputed each step.
+## Known simplifications
+- [ ] Altitude-dependent gas temperature: replace constant T_BALLOON (20°C) with a model that accounts for ambient cooling, solar heating, and time-of-day effects. Currently the gas is assumed 20°C at all altitudes, which overestimates volume at high altitude (ambient ~-57°C in the stratosphere).
+- [ ] (Low priority) Add vertical wind component: the wind field currently has no vertical component (fz = 0). Stratospheric vertical winds are small but non-zero; adding them would improve realism.
+- [ ] (Low priority) Recompute volume at Verlet half-step: during integration, density is recomputed at the updated altitude but volume (V = nRT/P) is not. For DT=1s the error is negligible, but recomputing would make the two force evaluations fully consistent.
+- [ ] (Low priority) Extend ISA beyond two layers: the atmosphere model covers the troposphere and stratosphere only. Adding the mesosphere and above would allow operations beyond ~50 km, but is unnecessary for the current ~25 km ceiling.
 
 ## Training performance
 - [ ] (Low priority) Increase `train_freq` (currently 4) to 8-16 to reduce gradient updates per env step. Trades sample efficiency for wall-clock speed — not worth doing unless training time becomes a bottleneck again, since GPU and vectorised envs already address the main performance issues.
