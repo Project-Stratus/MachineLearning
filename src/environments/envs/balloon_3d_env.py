@@ -88,7 +88,7 @@ from environments.core.reward import balloon_reward, l2_distance
 from environments.render.pygame_render import PygameRenderer
 from environments.core.constants import (
     VOL_MAX, ALT_MAX, XY_MAX, VEL_MAX, P_MAX, DT,
-    P0, SCALE_HEIGHT, T_AIR, M_AIR, R, G, CD, AREA, RHO_0,
+    P0, M_AIR, G, RHO_0,
     MIN_START_DISTANCE,
 )
 
@@ -396,10 +396,18 @@ class Balloon3DEnv(gym.Env):
         global _JIT_WARMED
         if not _JIT_WARMED:
             try:
-                from environments.core.jit_kernels import pressure_numba, density_numba, wind_sample_idx_numba, physics_step_numba
+                from environments.core.jit_kernels import (
+                    pressure_numba, density_numba, temperature_numba,
+                    wind_sample_idx_numba, physics_step_numba,
+                    sphere_area_from_volume, morrison_cd, dynamic_viscosity_numba,
+                )
                 # warm-up calls with small dummy inputs (compile once)
-                _ = pressure_numba(P0, SCALE_HEIGHT, 1000.0)
-                _ = density_numba(P0, SCALE_HEIGHT, T_AIR, M_AIR, R, 1000.0)
+                _ = temperature_numba(1000.0)
+                _ = pressure_numba(P0, 1000.0)
+                _ = density_numba(P0, M_AIR, 1000.0)
+                _ = dynamic_viscosity_numba(1000.0)
+                _ = sphere_area_from_volume(1.0)
+                _ = morrison_cd(1000.0)
                 # wind warmup
                 wf = self.wind
                 _ = wind_sample_idx_numba(wf.x_centers[0], wf.y_centers[0], wf.z_centers[0],
@@ -410,7 +418,7 @@ class Balloon3DEnv(gym.Env):
                 vel = self._balloon.vel.astype(np.float64, copy=True)
                 ext = np.zeros_like(pos)
                 ctrl = np.zeros_like(pos)
-                physics_step_numba(pos, vel, DT, self._balloon.mass, G, CD, AREA, RHO_0, self._balloon.volume, ext, ctrl, self.dim, VEL_MAX)
+                physics_step_numba(pos, vel, DT, self._balloon.mass, G, RHO_0, self._balloon.volume, ext, ctrl, self.dim, VEL_MAX)
             except Exception:
                 pass  # if numba missing or compilation deferred, no problem
             _JIT_WARMED = True
