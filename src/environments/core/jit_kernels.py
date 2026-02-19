@@ -100,69 +100,124 @@ def wind_sample_idx_numba(x: float, y: float, z: float,
 
 
 @njit(cache=True, fastmath=True)
+def _compute_drag(vel: np.ndarray, wind_vel: np.ndarray,
+                  rho_air: float, area: float, diameter: float,
+                  alt: float, n_dim: int) -> (float, float, float):
+    """
+    Compute drag magnitude and relative-velocity direction.
+
+    Drag is proportional to |v_rel|^2 where v_rel = v_balloon - v_wind,
+    directed opposite to v_rel.
+
+    Returns (f_mag, rel_speed, inv_rel_speed).
+    """
+    rel_speed2 = 0.0
+    for i in range(n_dim):
+        dv = vel[i] - wind_vel[i]
+        rel_speed2 += dv * dv
+
+    have_rel = rel_speed2 > 1e-24
+    if not have_rel:
+        return 0.0, 0.0, 0.0
+
+    rel_speed = math.sqrt(rel_speed2)
+    inv_rel_speed = 1.0 / rel_speed
+
+    mu = dynamic_viscosity_numba(alt)
+    Re = rho_air * rel_speed * diameter / mu
+    cd = morrison_cd(Re)
+    f_mag = 0.5 * cd * area * rho_air * rel_speed2
+
+    return f_mag, rel_speed, inv_rel_speed
+
+
+@njit(cache=True, fastmath=True)
+def _compute_accel(pos: np.ndarray, vel: np.ndarray,
+                   wind_vel: np.ndarray, external_force: np.ndarray,
+                   mass: float, G: float,
+                   rho_air: float, volume: float, area: float, diameter: float,
+                   n_dim: int,
+                   accel_out: np.ndarray) -> None:
+    """Compute per-axis acceleration into *accel_out* (pre-allocated)."""
+    z_idx = n_dim - 1
+    alt = pos[z_idx]
+
+    f_mag, rel_speed, inv_rel_speed = _compute_drag(
+        vel, wind_vel, rho_air, area, diameter, alt, n_dim)
+    have_rel = rel_speed > 1e-12
+
+    buoy_z = rho_air * G * volume - mass * G
+
+    for i in range(n_dim):
+        # Drag opposes relative velocity (v_balloon - v_wind)
+        if have_rel:
+            drag_i = -f_mag * (vel[i] - wind_vel[i]) * inv_rel_speed
+        else:
+            drag_i = 0.0
+        f_i = external_force[i] + drag_i
+        if i == z_idx:
+            f_i += buoy_z
+        accel_out[i] = f_i / mass
+
+
+@njit(cache=True, fastmath=True)
 def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
                        dt: float,
                        mass: float,
                        G: float,
                        rho_air: float, volume: float,
-                       external_force: np.ndarray, control_force: np.ndarray,
-                       n_dim: int, vel_max: float) -> None:
+                       wind_vel: np.ndarray, external_force: np.ndarray,
+                       n_dim: int, vel_max: float,
+                       p0: float, M_air: float) -> None:
     """
-    In-place integration for 1D/2D/3D with volume-dependent drag.
+    Velocity-Verlet integration for 1D/2D/3D.
 
-    Drag coefficient and frontal area are derived from the current balloon
-    volume and flow conditions (Morrison CD correlation + sphere geometry).
+    Drag uses relative velocity (v_balloon - v_wind) with volume-dependent
+    area and Morrison CD correlation.
+
+    Algorithm:
+      1. a_old = F(pos, vel) / m
+      2. pos += vel * dt + 0.5 * a_old * dt^2
+      3. Recompute rho at new altitude
+      4. a_new = F(pos_new, vel) / m
+      5. vel += 0.5 * (a_old + a_new) * dt
     """
     z_idx = n_dim - 1
-    alt = pos[z_idx]
 
-    # Volume-dependent frontal area
+    # Geometry from current volume
     area = sphere_area_from_volume(volume)
-
-    # Diameter for Reynolds number
     r = (volume / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
     diameter = 2.0 * r
 
-    # Speed
-    speed2 = 0.0
+    # --- Step 1: acceleration at current state ---
+    a_old = np.empty(n_dim, dtype=np.float64)
+    _compute_accel(pos, vel, wind_vel, external_force,
+                   mass, G, rho_air, volume, area, diameter, n_dim, a_old)
+
+    # --- Step 2: update position ---
+    half_dt2 = 0.5 * dt * dt
     for i in range(n_dim):
-        vi = vel[i]
-        speed2 += vi * vi
+        pos[i] += vel[i] * dt + a_old[i] * half_dt2
 
-    have_speed = speed2 > 1e-24  # SPEED_EPS**2
-    speed = math.sqrt(speed2) if have_speed else 0.0
-    inv_speed = 1.0 / speed if have_speed else 0.0
+    # --- Step 3: recompute density at new altitude ---
+    rho_new = density_numba(p0, M_air, pos[z_idx])
 
-    # Reynolds-dependent drag coefficient
-    if have_speed:
-        mu = dynamic_viscosity_numba(alt)
-        Re = rho_air * speed * diameter / mu
-        cd = morrison_cd(Re)
-        f_mag = 0.5 * cd * area * rho_air * speed2
-    else:
-        f_mag = 0.0
+    # --- Step 4: acceleration at new position (with old velocity) ---
+    a_new = np.empty(n_dim, dtype=np.float64)
+    _compute_accel(pos, vel, wind_vel, external_force,
+                   mass, G, rho_new, volume, area, diameter, n_dim, a_new)
 
-    buoy_z = rho_air * G * volume - mass * G  # only affects vertical axis
-
-    # Integrate per-axis
+    # --- Step 5: update velocity ---
+    half_dt = 0.5 * dt
     for i in range(n_dim):
-        drag_i = (-f_mag * vel[i] * inv_speed) if have_speed else 0.0
-        f_i = external_force[i] + control_force[i] + drag_i
-        if i == z_idx:
-            f_i += buoy_z
-        # acceleration
-        a_i = f_i / mass
-        # vel update + clip
-        vi = vel[i] + a_i * dt
+        vi = vel[i] + (a_old[i] + a_new[i]) * half_dt
         if vi > vel_max:
             vi = vel_max
         elif vi < -vel_max:
             vi = -vel_max
         vel[i] = vi
-        # pos update
-        pos[i] += vi * dt
 
-    # ground clamp on vertical axis
+    # Ground clamp
     if pos[z_idx] < 0.0:
         pos[z_idx] = 0.0
         vel[z_idx] = 0.0

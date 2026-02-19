@@ -207,7 +207,7 @@ class Balloon3DEnv(gym.Env):
         self.goal: np.ndarray | None = None
         self._time: int = 0
         self.last_wind = np.zeros(3, dtype=np.float32)
-        self._control_force_buf = np.zeros(3, dtype=np.float32)  # reusable for step()
+        self._wind_vel_buf = np.zeros(3, dtype=np.float64)  # reusable wind velocity for physics
         self.last_pressure_norm = 0.0
 
         # bookkeeping for gym
@@ -416,9 +416,9 @@ class Balloon3DEnv(gym.Env):
                 # physics warmup (dim-aware)
                 pos = self._balloon.pos.astype(np.float64, copy=True)
                 vel = self._balloon.vel.astype(np.float64, copy=True)
+                wv = np.zeros_like(pos)
                 ext = np.zeros_like(pos)
-                ctrl = np.zeros_like(pos)
-                physics_step_numba(pos, vel, DT, self._balloon.mass, G, RHO_0, self._balloon.volume, ext, ctrl, self.dim, VEL_MAX)
+                physics_step_numba(pos, vel, DT, self._balloon.mass, G, RHO_0, self._balloon.volume, wv, ext, self.dim, VEL_MAX, P0, M_AIR)
             except Exception:
                 pass  # if numba missing or compilation deferred, no problem
             _JIT_WARMED = True
@@ -440,20 +440,23 @@ class Balloon3DEnv(gym.Env):
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
         self.last_wind[:] = wind    # Cache for obs (copies before buffer reuse)
 
-        # Build control force without per-step allocation
+        # Build wind velocity vector for relative-velocity drag
         if self.dim == 1:
-            self._control_force_buf[0] = 0.0
-            control_force = self._control_force_buf[:1]
+            self._wind_vel_buf[0] = 0.0
+            wind_vel = self._wind_vel_buf[:1]
         elif self.dim == 2:
-            self._control_force_buf[0] = wind[0]
-            self._control_force_buf[1] = wind[1]
-            self._control_force_buf[2] = 0.0
-            control_force = self._control_force_buf
+            self._wind_vel_buf[0] = wind[0]
+            self._wind_vel_buf[1] = wind[1]
+            self._wind_vel_buf[2] = 0.0
+            wind_vel = self._wind_vel_buf
         else:
-            control_force = wind  # already float32 buffer from wind_field
+            self._wind_vel_buf[0] = wind[0]
+            self._wind_vel_buf[1] = wind[1]
+            self._wind_vel_buf[2] = wind[2]
+            wind_vel = self._wind_vel_buf
 
-        # update balloon physics
-        self._balloon.update(DT, external_force=control_force)  # Balloon signature accepts *external_force*
+        # update balloon physics (wind passed as velocity, not force)
+        self._balloon.update(DT, wind_vel=wind_vel)
 
         if self.dim == 2:          # keep altitude fixed
             self._balloon.pos[2] = self.z0

@@ -1,7 +1,7 @@
-- [ ] Unify drag model to use relative velocity: drag should be proportional to `(balloon_vel - wind_vel)^2` rather than the current setup where wind is an additive external force and drag opposes absolute velocity independently. Current approach works at low wind speeds but will matter as wind fields become more realistic.
+- [x] Unify drag model to use relative velocity: drag proportional to `(balloon_vel - wind_vel)^2`. Wind passed as velocity vector, not force. Balloon drifting with wind experiences zero drag.
 - [x] Altitude-dependent temperature model: ISA lapse rate (6.5 K/km troposphere, constant stratosphere). Pressure uses barometric formula. Density, buoyancy, and drag all altitude-aware.
 - [x] Volume-dependent cross-sectional area and drag coefficient: frontal area derived from sphere geometry, CD from Morrison (2013) Reynolds-number correlation. Includes Sutherland's law for dynamic viscosity.
-- [ ] Upgrade integrator from forward Euler to symplectic (e.g. velocity Verlet): at `DT=1.0s` Euler is adequate for gentle manoeuvres but accumulates energy error and can become unstable during rapid altitude changes or strong wind shear transitions.
+- [x] Upgrade integrator from forward Euler to velocity Verlet (symplectic, second-order). Two force evaluations per step with density recomputed at the updated position. Better energy conservation and stability at DT=1.0s.
 - [x] Passive gas expansion/compression with altitude: balloon tracks gas moles, volume derived via ideal gas law (V = nRT/P). Gas expands/compresses automatically with altitude changes.
 - [ ] Variable balloon mass: `MASS = 2.0` is constant. Real balloons lose mass through gas venting/leakage and ballast drops. Relevant if the action space is eventually expanded to include gas management.
 

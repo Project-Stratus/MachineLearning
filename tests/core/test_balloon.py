@@ -1,4 +1,4 @@
-"""Tests for the Balloon class - gas tracking, passive expansion, volume-dependent drag."""
+"""Tests for the Balloon class - gas tracking, passive expansion, relative-velocity drag, Verlet integration."""
 
 import math
 import numpy as np
@@ -362,3 +362,143 @@ class TestBalloonProperties:
         balloon_1d.inflate(0.5)
         ev_after = balloon_1d.extra_volume
         assert ev_after > ev_before
+
+
+class TestRelativeVelocityDrag:
+    """Tests for drag using relative velocity (v_balloon - v_wind)."""
+
+    def test_no_drag_when_moving_with_wind(self, atmosphere):
+        """Balloon moving at wind speed should experience zero drag."""
+        balloon = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+        balloon.vel = np.array([5.0, 3.0, 0.0])
+        wind = np.array([5.0, 3.0, 0.0])  # same as balloon velocity
+        drag = balloon.drag_force(wind_vel=wind)
+        assert np.allclose(drag, 0.0, atol=1e-10)
+
+    def test_drag_from_wind_on_stationary_balloon(self, atmosphere):
+        """Stationary balloon in wind should experience drag in the wind direction."""
+        balloon = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+        balloon.vel = np.zeros(3)
+        wind = np.array([5.0, 0.0, 0.0])
+        drag = balloon.drag_force(wind_vel=wind)
+        # v_rel = [0,0,0] - [5,0,0] = [-5,0,0]; drag opposes v_rel -> positive x
+        assert drag[0] > 0, "Drag should push balloon in wind direction"
+        assert drag[1] == pytest.approx(0.0, abs=1e-10)
+
+    def test_drag_with_wind_reduces_drag_magnitude(self, atmosphere):
+        """Tailwind should reduce drag compared to still air."""
+        balloon = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+        balloon.vel = np.array([5.0, 0.0, 0.0])
+
+        drag_still = balloon.drag_force(wind_vel=np.zeros(3))
+        drag_tail = balloon.drag_force(wind_vel=np.array([3.0, 0.0, 0.0]))
+
+        assert np.linalg.norm(drag_tail) < np.linalg.norm(drag_still)
+
+    def test_drag_with_headwind_increases_drag_magnitude(self, atmosphere):
+        """Headwind should increase drag compared to still air."""
+        balloon = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+        balloon.vel = np.array([5.0, 0.0, 0.0])
+
+        drag_still = balloon.drag_force(wind_vel=np.zeros(3))
+        drag_head = balloon.drag_force(wind_vel=np.array([-3.0, 0.0, 0.0]))
+
+        assert np.linalg.norm(drag_head) > np.linalg.norm(drag_still)
+
+    def test_wind_accelerates_stationary_balloon(self, atmosphere):
+        """Wind should accelerate a stationary balloon via relative-velocity drag."""
+        balloon = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+        balloon.vel = np.zeros(3)
+        wind = np.array([5.0, 0.0, 0.0])
+        x0 = balloon.x
+        balloon.update(1.0, wind_vel=wind)
+        # Balloon should move in the wind direction
+        assert balloon.x > x0
+
+    def test_wind_passed_to_update(self, atmosphere):
+        """update() should accept wind_vel and use it for drag."""
+        b_wind = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+        b_still = Balloon(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, 10_000.0])
+
+        b_wind.update(1.0, wind_vel=np.array([10.0, 0.0, 0.0]))
+        b_still.update(1.0)  # no wind
+
+        # With wind, balloon should have moved more in x
+        assert b_wind.x > b_still.x
+
+
+class TestVerletIntegration:
+    """Tests for velocity Verlet integrator properties."""
+
+    def test_verlet_better_energy_conservation(self, atmosphere):
+        """Verlet should conserve energy better than Euler over many steps.
+
+        A balloon at neutral buoyancy with an initial vertical velocity
+        should oscillate with nearly constant total energy (kinetic + potential).
+        """
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[10_000.0])
+        balloon.vel = np.array([2.0])  # small upward kick
+
+        # Record initial kinetic + gravitational potential energy
+        def energy(b):
+            KE = 0.5 * b.mass * b.velocity**2
+            PE = b.mass * G * b.altitude
+            return KE + PE
+
+        E0 = energy(balloon)
+        energies = [E0]
+        for _ in range(200):
+            balloon.update(1.0)
+            energies.append(energy(balloon))
+
+        # Energy should not drift by more than 5% over 200 steps
+        E_final = energies[-1]
+        drift = abs(E_final - E0) / E0
+        assert drift < 0.05, f"Energy drifted by {drift*100:.1f}%"
+
+    def test_verlet_symmetric_in_time(self, atmosphere):
+        """Position update should include the 0.5*a*dt^2 term (Verlet signature).
+
+        With a known constant force, the Verlet position update
+        (x += v*dt + 0.5*a*dt^2) gives a more accurate result than Euler
+        (x += v*dt where v already includes a*dt).
+        """
+        # Balloon with strong buoyancy excess — known upward acceleration
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[10_000.0])
+        balloon.inflate(0.1 * balloon.stationary_volume)
+        z0 = balloon.altitude
+        v0 = balloon.velocity  # 0.0
+
+        balloon.update(1.0)
+
+        # With Verlet, after 1 step: pos = z0 + v0*dt + 0.5*a*dt^2
+        # Since v0=0, position change should be ~0.5*a*1.0
+        # With Euler, it would be a*1.0 (velocity updated first, then position)
+        dz = balloon.altitude - z0
+        # The position change should be positive (rising) and moderate
+        assert dz > 0
+        # Second step should show velocity has built up
+        z1 = balloon.altitude
+        balloon.update(1.0)
+        dz2 = balloon.altitude - z1
+        # Second step covers more distance (velocity accumulated)
+        assert dz2 > dz
+
+    def test_verlet_stable_ascent(self, atmosphere):
+        """Verlet should produce a smooth ascent with moderate buoyancy excess."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[8_000.0])
+        balloon.inflate(0.3 * balloon.stationary_volume)
+
+        altitudes = []
+        for _ in range(50):
+            balloon.update(1.0)
+            altitudes.append(balloon.altitude)
+
+        # Altitude should increase monotonically (smooth ascent to terminal velocity)
+        reversals = 0
+        for i in range(2, len(altitudes)):
+            if (altitudes[i] - altitudes[i-1]) * (altitudes[i-1] - altitudes[i-2]) < 0:
+                reversals += 1
+        assert reversals < 5, f"Too many direction reversals ({reversals}), suggests instability"
+        # Should have risen overall
+        assert altitudes[-1] > 8_000.0

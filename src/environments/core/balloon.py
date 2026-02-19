@@ -34,8 +34,15 @@ class Balloon:
 
     Drag model
     ----------
+    Drag is proportional to |v_balloon - v_wind|^2 (relative velocity).
     Frontal area is derived from volume (sphere assumption) and the drag
     coefficient uses the Morrison (2013) Reynolds-number correlation.
+
+    Integration
+    -----------
+    Velocity Verlet (symplectic, second-order).  Forces are evaluated twice
+    per step — once at the current position and once at the updated position —
+    giving much better energy conservation and stability than forward Euler.
     """
 
     def __init__(
@@ -60,17 +67,14 @@ class Balloon:
 
         self.pos = np.ascontiguousarray(position, dtype=np.float64)
         self.vel = np.ascontiguousarray(velocity, dtype=np.float64)
-        self._zero_force = np.zeros(dim, dtype=np.float64)
+        self._zero_vec = np.zeros(dim, dtype=np.float64)
         self.t = 0.0
 
         # Gas state ------------------------------------------------------------
-        # Compute initial moles so volume equals neutral-buoyancy volume at
-        # the starting altitude (mass / rho_air).
         alt = self.pos[-1]
         p_amb = self.atmosphere.pressure(alt)
         rho_air = self.atmosphere.density(alt)
         self.stationary_volume = self.mass / rho_air
-        # n = P * V / (R * T_balloon)
         self.n_gas = p_amb * self.stationary_volume / (R * T_BALLOON)
         self.oscillate = oscillate
 
@@ -138,21 +142,12 @@ class Balloon:
 
     @property
     def extra_volume(self):
-        """Difference between current gas-law volume and stationary volume.
-
-        Provided for backward compatibility with tests that inspect
-        extra_volume after inflate/deflate calls.
-        """
+        """Difference between current gas-law volume and stationary volume."""
         return self._gas_law_volume() - self.stationary_volume
 
     def apply_volume_change(self, delta: float) -> None:
-        """Add/remove gas to change volume by approximately *delta* m³.
-
-        Converts the requested volume change to moles at the current ambient
-        pressure so the effect is altitude-aware.
-        """
+        """Add/remove gas to change volume by approximately *delta* m³."""
         p_amb = self.atmosphere.pressure(self.pos[-1])
-        # dn = P * dV / (R * T)
         dn = p_amb * delta / (R * T_BALLOON)
         self.n_gas += dn
 
@@ -187,10 +182,14 @@ class Balloon:
         f[-1] = -self.mass * G
         return f
 
-    def drag_force(self, rho_air: float | None = None) -> np.ndarray:
-        """Drag with volume-dependent area and Reynolds-dependent CD."""
-        speed = np.linalg.norm(self.vel)
-        if speed < SPEED_EPS:
+    def drag_force(self, rho_air: float | None = None,
+                   wind_vel: np.ndarray | None = None) -> np.ndarray:
+        """Drag from relative velocity (v_balloon - v_wind)."""
+        if wind_vel is None:
+            wind_vel = self._zero_vec
+        v_rel = self.vel - wind_vel
+        rel_speed = np.linalg.norm(v_rel)
+        if rel_speed < SPEED_EPS:
             return np.zeros(self.dim)
         if rho_air is None:
             rho_air = self.atmosphere.density(self.pos[-1])
@@ -199,16 +198,32 @@ class Balloon:
         area = _sphere_area(vol)
         diameter = 2.0 * (vol / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
 
-        # Reynolds number
         T = self.atmosphere.temperature(self.pos[-1])
         mu = MU_REF * (T / T_REF) ** 1.5 * (T_REF + S_SUTH) / (T + S_SUTH)
-        Re = rho_air * speed * diameter / mu
+        Re = rho_air * rel_speed * diameter / mu
         cd = _morrison_cd(Re)
 
-        f_mag = 0.5 * cd * area * rho_air * speed**2
-        return -f_mag * (self.vel / speed)
+        f_mag = 0.5 * cd * area * rho_air * rel_speed**2
+        return -f_mag * (v_rel / rel_speed)
 
-    def update(self, *args, external_force=None, control_force=None):
+    def update(self, *args, wind_vel=None, external_force=None,
+               control_force=None):
+        """Advance the balloon state by one timestep.
+
+        Parameters
+        ----------
+        dt : float
+            Timestep (seconds).  Passed as the single positional argument,
+            or as the second of two positional arguments (t, dt).
+        wind_vel : array-like, optional
+            Wind velocity vector at the balloon's position.  Drag is computed
+            from (v_balloon - wind_vel).  Defaults to zero (still air).
+        external_force : array-like, optional
+            Additional external force vector (N).
+        control_force : array-like, optional
+            Deprecated.  Treated identically to *external_force* and added
+            to it for backward compatibility.
+        """
         if len(args) == 1:
             dt = float(args[0])
             t = self.t + dt
@@ -218,16 +233,23 @@ class Balloon:
         else:
             raise TypeError("update() expects (dt) or (t, dt)")
 
-        if external_force is None:
-            external_force = self._zero_force
-        elif not isinstance(external_force, np.ndarray) or external_force.dtype != np.float64:
-            external_force = np.asarray(external_force, dtype=np.float64)
-        if control_force is None:
-            control_force = self._zero_force
-        elif not isinstance(control_force, np.ndarray) or control_force.dtype != np.float64:
-            control_force = np.asarray(control_force, dtype=np.float64)
+        if wind_vel is None:
+            wind_vel = self._zero_vec
+        elif not isinstance(wind_vel, np.ndarray) or wind_vel.dtype != np.float64:
+            wind_vel = np.asarray(wind_vel, dtype=np.float64)
 
-        # Compute density once for this step
+        # Merge external_force and legacy control_force into one vector
+        ext = self._zero_vec
+        if external_force is not None:
+            if not isinstance(external_force, np.ndarray) or external_force.dtype != np.float64:
+                external_force = np.asarray(external_force, dtype=np.float64)
+            ext = external_force
+        if control_force is not None:
+            if not isinstance(control_force, np.ndarray) or control_force.dtype != np.float64:
+                control_force = np.asarray(control_force, dtype=np.float64)
+            ext = ext + control_force if ext is not self._zero_vec else control_force
+
+        # Compute density at current altitude
         z = self.pos[-1]
         if _JIT_OK:
             rho_air = float(density_numba(self.atmosphere.p0, self.atmosphere.molar_mass, z))
@@ -239,24 +261,66 @@ class Balloon:
             physics_step_numba(
                 self.pos, self.vel, dt, self.mass, G,
                 rho_air, vol,
-                external_force, control_force, int(self.dim), VEL_MAX,
+                wind_vel, ext, int(self.dim), VEL_MAX,
+                self.atmosphere.p0, self.atmosphere.molar_mass,
             )
         else:
-            # Fallback: pure-Python path
-            f_net = (self.buoyant_force(t, rho_air) + self.weight() +
-                     self.drag_force(rho_air) + external_force + control_force)
-            acc = f_net / self.mass
-            self.vel += acc * dt
-            self.vel = np.clip(self.vel, -VEL_MAX, VEL_MAX)
-            self.pos += self.vel * dt
-            if self.pos[-1] < 0.0:
-                self.pos[-1] = 0.0
-                self.vel[-1] = 0.0
+            self._verlet_step_py(dt, t, rho_air, vol, wind_vel, ext)
 
         self.t = t
 
+    def _verlet_step_py(self, dt, t, rho_air, vol, wind_vel, ext):
+        """Pure-Python velocity Verlet integration."""
+        # Geometry
+        area = _sphere_area(vol)
+        diameter = 2.0 * (vol / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
 
-# ---- Module-level helpers (pure Python, used by Balloon.drag_force) ---------
+        # Step 1: acceleration at current state
+        a_old = self._compute_accel_py(rho_air, vol, area, diameter, wind_vel, ext)
+
+        # Step 2: update position
+        self.pos += self.vel * dt + 0.5 * a_old * dt**2
+
+        # Step 3: recompute density at new altitude
+        rho_new = self.atmosphere.density(self.pos[-1])
+
+        # Step 4: acceleration at new position (with old velocity)
+        a_new = self._compute_accel_py(rho_new, vol, area, diameter, wind_vel, ext)
+
+        # Step 5: update velocity
+        self.vel += 0.5 * (a_old + a_new) * dt
+        self.vel = np.clip(self.vel, -VEL_MAX, VEL_MAX)
+
+        # Ground clamp
+        if self.pos[-1] < 0.0:
+            self.pos[-1] = 0.0
+            self.vel[-1] = 0.0
+
+    def _compute_accel_py(self, rho_air, vol, area, diameter, wind_vel, ext):
+        """Compute acceleration vector (pure Python)."""
+        # Relative velocity drag
+        v_rel = self.vel - wind_vel
+        rel_speed = np.linalg.norm(v_rel)
+
+        if rel_speed > SPEED_EPS:
+            T = self.atmosphere.temperature(self.pos[-1])
+            mu = MU_REF * (T / T_REF) ** 1.5 * (T_REF + S_SUTH) / (T + S_SUTH)
+            Re = rho_air * rel_speed * diameter / mu
+            cd = _morrison_cd(Re)
+            f_mag = 0.5 * cd * area * rho_air * rel_speed**2
+            drag = -f_mag * (v_rel / rel_speed)
+        else:
+            drag = np.zeros(self.dim)
+
+        # Buoyancy + weight (vertical only)
+        buoy_weight = np.zeros(self.dim)
+        buoy_weight[-1] = rho_air * G * vol - self.mass * G
+
+        f_net = buoy_weight + drag + ext
+        return f_net / self.mass
+
+
+# ---- Module-level helpers (pure Python, used by Balloon methods) ------------
 
 def _sphere_area(volume: float) -> float:
     r = (volume / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
