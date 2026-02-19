@@ -29,9 +29,9 @@ TRAIN_CFG = dict(
     buffer_size = 1_000_000,
     learning_starts = 50_000,
     train_freq = 4,                   # collect 4 env steps between gradient updates
-    gradient_steps = 1,               # 1 gradient step per update (standard DQN ratio)
-    target_update_interval = 20_000,  # soft: use tau if preferred; here: periodic hard update
-    batch_size = 256,
+    gradient_steps = 4,               # 4 gradient steps per update (more learning per collected step)
+    target_update_interval = 10_000,  # halved to match faster online network update rate
+    batch_size = 512,
     exploration_initial_eps = 1.0,
     exploration_final_eps = 0.01,
     exploration_fraction = 0.3,      # portion of training over which epsilon decays
@@ -54,7 +54,7 @@ ENV_CONFIG = dict(
     wind_pattern="altitude_shear_2d",  # wind direction rotates with altitude (N→E→S→W)
 )
 
-MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
+MAX_ENVS = max(8, os.cpu_count() - 2)
 N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))
 
 
