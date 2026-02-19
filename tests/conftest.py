@@ -118,6 +118,6 @@ def rng():
 def expected_obs_size(dim: int) -> int:
     """Calculate expected observation size for a given dimension.
 
-    Observation layout: goal(d) + volume(1) + position(d) + delta(d) + velocity(d) + pressure(1) + wind(d)
+    Observation layout: goal(d) + volume(1) + position(d) + delta(d) + velocity(d) + pressure(1) + wind(d) + ballast(1) + gas(1)
     """
-    return 5 * dim + 2
+    return 5 * dim + 4

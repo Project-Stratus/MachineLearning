@@ -1,7 +1,10 @@
 import glob
 import os
+from collections import defaultdict
+
+import numpy as np
 import pandas as pd
-from stable_baselines3.common.callbacks import ProgressBarCallback
+from stable_baselines3.common.callbacks import BaseCallback, ProgressBarCallback
 
 
 def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
@@ -25,6 +28,41 @@ def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
     # If you want a single global episode index across all vec envs:
     df["global_episode"] = range(1, len(df) + 1)
     return df
+
+
+class TerminationTracker(BaseCallback):
+    """Tracks termination reasons from VecEnv infos and prints a summary at the end."""
+
+    def __init__(self, verbose: int = 0):
+        super().__init__(verbose)
+        self.counts: dict[str, int] = defaultdict(int)
+
+    def _on_step(self) -> bool:
+        # SB3 VecEnv stores episode info in self.locals["infos"]
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", np.zeros(len(infos), dtype=bool))
+        for info, done in zip(infos, dones):
+            if not done:
+                continue
+            reason = info.get("termination_reason", None)
+            if reason is None:
+                # Check inside the terminal_observation wrapper used by VecEnv
+                ep_info = info.get("terminal_info", info)
+                reason = ep_info.get("termination_reason", "Unknown")
+            self.counts[reason] += 1
+        return True
+
+    def _on_training_end(self) -> None:
+        total = sum(self.counts.values())
+        if total == 0:
+            return
+        print(f"\n{'='*55}")
+        print(f"  Termination Breakdown ({total:,} episodes)")
+        print(f"{'='*55}")
+        for reason, count in sorted(self.counts.items(), key=lambda x: -x[1]):
+            pct = 100.0 * count / total
+            print(f"  {reason:<45s} {count:>6,}  ({pct:5.1f}%)")
+        print(f"{'='*55}\n")
 
 
 class InfoProgressBar(ProgressBarCallback):

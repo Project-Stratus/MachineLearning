@@ -137,12 +137,12 @@ class TestObservationPacking:
         env_1d.reset(seed=42)
         obs = env_1d._get_obs()
 
-        # Order: goal, volume, position, delta, velocity, pressure, wind
-        # For dim=1: sizes are 1, 1, 1, 1, 1, 1, 1 = 7 total
+        # Order: goal, volume, position, delta, velocity, pressure, wind, ballast, gas
+        # For dim=1: sizes are 1, 1, 1, 1, 1, 1, 1, 1, 1 = 9 total
 
         # We can't easily extract individual components from flat array
         # but we can verify the total size
-        assert obs.shape == (7,)
+        assert obs.shape == (expected_obs_size(1),)
 
     def test_observation_goal_normalized(self, env_any_dim):
         """Goal should be normalized to [0, 1]."""

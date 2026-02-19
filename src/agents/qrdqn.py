@@ -12,7 +12,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMoni
 from sb3_contrib import QRDQN
 
 import environments  # registers the Balloon3D-v0 environment
-from agents.utils import _gather_monitor_csvs, InfoProgressBar
+from agents.utils import _gather_monitor_csvs, InfoProgressBar, TerminationTracker
 
 # ---- Config ----
 ENVIRONMENT_NAME = "environments/Balloon3D-v0"
@@ -156,7 +156,9 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
     )
 
     callbacks = [eval_cb]
-    if not hpc:
+    if hpc:
+        callbacks.append(TerminationTracker())
+    else:
         tqdm_cb = InfoProgressBar(
             description=f"QR-DQN | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
             postfix=dict(gamma=TRAIN_CFG["gamma"])

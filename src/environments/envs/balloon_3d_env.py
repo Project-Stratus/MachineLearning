@@ -91,7 +91,7 @@ from environments.render.pygame_render import PygameRenderer
 from environments.core.constants import (
     VOL_MAX, ALT_MAX, XY_MAX, VEL_MAX, P_MAX, DT,
     P0, M_AIR, G, RHO_0,
-    BALLAST_DROP, VENT_RATE,
+    BALLAST_DROP, BALLAST_INITIAL, VENT_RATE,
     MIN_START_DISTANCE,
     INIT_VEL_SIGMA, INIT_GAS_FRAC_RANGE, INIT_BALLAST_LOSS_MAX,
 )
@@ -244,6 +244,8 @@ class Balloon3DEnv(gym.Env):
         low.extend([-1.0] * dim)                     # velocity
         low.append(0.0)                              # pressure
         low.extend([-1.0] * dim)                     # wind
+        low.append(0.0)                              # ballast remaining
+        low.append(0.0)                              # gas remaining
 
         high.extend([1.0] * dim)                     # goal
         high.append(1.0)                             # volume
@@ -252,6 +254,8 @@ class Balloon3DEnv(gym.Env):
         high.extend([1.0] * dim)                     # velocity
         high.append(1.0)                             # pressure
         high.extend([1.0] * dim)                     # wind
+        high.append(1.0)                             # ballast remaining
+        high.append(1.0)                             # gas remaining
 
         return np.array(low, dtype=np.float32), np.array(high, dtype=np.float32)
 
@@ -300,6 +304,12 @@ class Balloon3DEnv(gym.Env):
         for j in range(d):
             self._obs_buf[i + j] = self.last_wind[j] * inv_wind_mag
         i += d
+
+        # resource levels (normalised to [0, 1], clamped)
+        self._obs_buf[i] = min(self._balloon.ballast_mass / BALLAST_INITIAL, 1.0)
+        i += 1
+        self._obs_buf[i] = min(self._balloon.n_gas / self._init_n_gas, 1.0)
+        i += 1
 
         return self._obs_buf.copy()
 
@@ -384,6 +394,9 @@ class Balloon3DEnv(gym.Env):
                                 position=init_pos,
                                 velocity=[0.0] * real_dim,
                                 )
+
+        # Store neutral-buoyancy gas amount for normalising the gas observation
+        self._init_n_gas = self._balloon.n_gas
 
         # --- Domain randomisation of initial conditions ---
         # Simulates variability after reaching float altitude: turbulence,

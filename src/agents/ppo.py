@@ -11,7 +11,7 @@ from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewar
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
 from stable_baselines3.common.monitor import Monitor
 
-from agents.utils import _gather_monitor_csvs, InfoProgressBar
+from agents.utils import _gather_monitor_csvs, InfoProgressBar, TerminationTracker
 """
 Time param cheat sheet:
 - BATCH_SIZE:   Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
@@ -131,7 +131,9 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
     )
 
     callbacks = [eval_callback]
-    if not hpc:
+    if hpc:
+        callbacks.append(TerminationTracker())
+    else:
         tqdm_callback = InfoProgressBar(
             description=f"PPO | steps={TOTAL_TIMESTEPS:,} | envs={N_ENVS} | device={device} |",
             postfix=dict(gamma=TRAIN_CFG["gamma"], ent_coef=TRAIN_CFG["ent_coef"]),
