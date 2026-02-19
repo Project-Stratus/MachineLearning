@@ -21,9 +21,9 @@ python tests/check_install.py --build --pip-check  # Smoke test
 
 ### Training & Running
 ```bash
-python main.py ppo --train --dim 1    # Train PPO in 1D
-python main.py dqn --train --dim 2    # Train DQN in 2D
-python main.py qrdqn --dim 3          # Test QR-DQN in 3D (no --train = inference)
+python main.py --train --dim 1    # Train QR-DQN in 1D
+python main.py --train --dim 2    # Train QR-DQN in 2D
+python main.py --dim 3            # Test QR-DQN in 3D (no --train = inference)
 ```
 
 ### Code Quality
@@ -33,7 +33,7 @@ Pre-commit hooks enforce `black` and `ruff`. Run `pre-commit install` to set up.
 
 ```
 src/
-├── agents/              # RL implementations (PPO, DQN, QR-DQN) wrapping Stable-Baselines3
+├── agents/              # QR-DQN agent wrapping sb3-contrib
 ├── environments/
 │   ├── core/            # Physics engine (balloon, atmosphere, wind_field, reward, jit_kernels)
 │   ├── envs/            # Gym-compatible Balloon3DEnv (supports 1D/2D/3D via dim parameter)
@@ -63,5 +63,5 @@ Use relative imports within `src/` subpackages. There is intentionally no top-le
 ## Tensorboard
 Logs stored in `./src/models/<agent>_model/`. View with:
 ```bash
-tensorboard --logdir ./src/models/ppo_model/
+tensorboard --logdir ./src/models/qr_dqn_model/
 ```

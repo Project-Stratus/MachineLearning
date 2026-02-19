@@ -30,14 +30,7 @@ class TestTorchCompat:
         assert probs.shape == (2, 3)
         assert torch.allclose(probs.sum(dim=-1), torch.ones(2))
 
-    def test_sb3_with_torch(self):
-        """Verify stable-baselines3 can initialise a model on the new torch."""
-        from stable_baselines3 import PPO
-
-        model = PPO("MlpPolicy", "CartPole-v1", verbose=0, device="cpu")
-        assert model.policy is not None
-
-    def test_sb3_contrib_with_torch(self):
+    def test_sb3_contrib_qrdqn_with_torch(self):
         """Verify sb3-contrib QRDQN works on the new torch."""
         from sb3_contrib import QRDQN
 

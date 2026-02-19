@@ -15,7 +15,7 @@ Station-keeping high-altitude balloons have several key advantages over drones, 
 ## How it works
 The agent interacts with a Gym-compatible 3D balloon environment at each timestep. It observes its position, velocity, altitude, ambient pressure, wind vector, and distance to a target location — all normalised to [0, 1]. It then chooses one of three discrete actions: **inflate**, **deflate**, or **do nothing**, which adjusts the balloon's buoyancy and therefore its altitude. By changing altitude, the agent moves into different wind layers and exploits wind currents to navigate toward the target.
 
-Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3). Vectorised environments collect rollouts in parallel, and the agent (PPO or QR-DQN) optimises a composite reward that balances proximity to the goal, approach direction, and penalties for crashes or leaving bounds. The best checkpoint is saved automatically when evaluation reward improves.
+Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) and [SB3-Contrib](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib). Vectorised environments collect rollouts in parallel, and the QR-DQN agent optimises a composite reward that balances proximity to the goal, approach direction, and penalties for crashes or leaving bounds. The best checkpoint is saved automatically when evaluation reward improves.
 
 ## Getting started
 ### Prerequisites
@@ -58,12 +58,12 @@ pre-commit run --all-files
 
 ### Training & Running
 ```bash
-python main.py ppo --train --dim 1           # Train PPO in 1D
-python main.py qrdqn --train --dim 2         # Train QR-DQN in 2D
-python main.py ppo --dim 3                   # Test PPO in 3D (no --train = inference)
-python main.py ppo --train --dim 1 --save_fig  # Train and save reward curve plot
-python main.py qrdqn --train --dim 3 -g      # Train QR-DQN on GPU
-python main.py qrdqn --train --dim 3 -g --hpc  # GPU training, no progress bar (for SLURM jobs)
+python main.py --train --dim 1                # Train QR-DQN in 1D
+python main.py --train --dim 2                # Train QR-DQN in 2D
+python main.py --dim 3                        # Test QR-DQN in 3D (no --train = inference)
+python main.py --train --dim 1 --save_fig     # Train and save reward curve plot
+python main.py --train --dim 3 -g             # Train QR-DQN on GPU
+python main.py --train --dim 3 -g --hpc       # GPU training, no progress bar (for SLURM jobs)
 ```
 
 ### Accessing TensorBoard during training
@@ -84,7 +84,7 @@ TensorBoard picks up new event files as they arrive, so re-running the rsync is 
 
 ## Basic repo layout:
 - `EDA/`: exploratory analyses, notebooks, and supporting scripts for balloon data
-- `src/agents/`: reinforcement-learning agents (PPO, QR-DQN) and their training/eval logic
+- `src/agents/`: QR-DQN agent and training/eval logic (deprecated agents in `old/`)
 - `src/environments/`: gym-compatible Balloon3D environment, physics core, renderers, rewards
 - `src/models/`: persisted checkpoints and training artefacts
 - `tests/`: pytest suite
