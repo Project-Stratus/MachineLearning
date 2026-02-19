@@ -173,6 +173,8 @@ class Balloon:
     def drop_ballast(self, amount: float = BALLAST_DROP) -> None:
         """Drop expendable ballast to reduce weight (irreversible)."""
         self.ballast_mass = max(0.0, self.ballast_mass - amount)
+        if self.ballast_mass < 1e-10:
+            self.ballast_mass = 0.0
 
     def vent_gas(self, volume_equiv: float = VENT_RATE) -> None:
         """Vent helium to reduce buoyancy (irreversible).

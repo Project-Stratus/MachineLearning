@@ -12,6 +12,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMoni
 from stable_baselines3.common.monitor import Monitor
 
 from agents.utils import _gather_monitor_csvs, InfoProgressBar, TerminationTracker
+from environments.wrappers.decision_interval import DecisionIntervalWrapper
 """
 Time param cheat sheet:
 - BATCH_SIZE:   Samples per SGD minibatch. How many samples the optimiser processes before one weight step.
@@ -44,8 +45,8 @@ POLICY_KWARGS = dict(
 )
 
 TOTAL_TIMESTEPS = 5_000_000  # Total training steps
-EVAL_FREQ = 500_000  # Evaluate every n steps
-REWARD_THRESHOLD = 4_800  # ~96% of max episode reward (5000); proves sustained station-keeping
+EVAL_FREQ = 50_000   # Evaluate every n decisions (each = 60 physics steps)
+REWARD_THRESHOLD = 83_000  # ~96% of max episode reward (86,400); proves sustained station-keeping
 
 MAX_ENVS = 4 if os.cpu_count() <= 8 else 8
 N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() //2))
@@ -68,7 +69,7 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
     device = torch.device("cuda") if use_gpu and torch.cuda.is_available() else torch.device("cpu")
 
     def make_env(env_id, seed, dim):
-        # Define at module level so it’s picklable for SubprocVecEnv
+        # Define at module level so it's picklable for SubprocVecEnv
         def _init():
             env = gym.make(
                 env_id,
@@ -76,6 +77,7 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
                 dim=dim,
                 disable_env_checker=True,
             )
+            env = DecisionIntervalWrapper(env)
             env = Monitor(env)
             env.reset(seed=seed)
             return env
@@ -101,7 +103,7 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
 
     print(f"Training with {N_ENVS} environments, dim={dim}.")
 
-    env = VecMonitor(build_vec_env(N_ENVS, ENVIRONMENT_NAME, dim=dim, seed=SEED))
+    env = build_vec_env(N_ENVS, ENVIRONMENT_NAME, dim=dim, seed=SEED)
 
     model = PPO(
         "MlpPolicy",
@@ -114,7 +116,12 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
     )
 
     # Create an evaluation callback (no vectorisation needed)
-    eval_env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True), filename=os.path.join(SAVE_PATH, "eval_monitor.csv"))
+    eval_env = Monitor(
+        DecisionIntervalWrapper(
+            gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True)
+        ),
+        filename=os.path.join(SAVE_PATH, "eval_monitor.csv")
+    )
 
     stop_callback = StopTrainingOnRewardThreshold(
         reward_threshold=REWARD_THRESHOLD,
@@ -167,7 +174,11 @@ def train(dim, verbose=0, render_freq=None, use_gpu: bool = False, hpc: bool = F
 def test(dim, use_gpu: bool = False) -> None:
     from environments.envs.balloon_3d_env import Actions
 
-    env: gym.Env = Monitor(gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 2_000}))
+    env: gym.Env = Monitor(
+        DecisionIntervalWrapper(
+            gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config={"time_max": 7_200})
+        )
+    )
 
     # Use a GPU if possible
     device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
@@ -178,7 +189,7 @@ def test(dim, use_gpu: bool = False) -> None:
     from environments.envs.balloon_3d_env import Balloon3DEnv
 
     model = PPO.load(MODEL_PATH, device="cpu")
-    env_temp = Balloon3DEnv(dim=1, render_mode=None)
+    env_temp = DecisionIntervalWrapper(Balloon3DEnv(dim=1, render_mode=None))
 
     obs, _ = env_temp.reset(seed=42)
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)

@@ -20,8 +20,8 @@ DT = 1.0                    # Time step (s)
 # ----- BALLOON CONSTANTS -----
 PAYLOAD_MASS = 2.0          # Fixed structural mass: envelope + gondola + electronics (kg)
 BALLAST_INITIAL = 5.0       # Expendable ballast mass at launch (kg)
-BALLAST_DROP = 0.02         # Ballast mass dropped per "drop" action (kg)
-VENT_RATE = 0.19            # Gas volume equivalent vented per "vent" action (m³)
+BALLAST_DROP = 0.01         # Ballast mass dropped per "drop" action (kg)
+VENT_RATE = 0.05            # Gas volume equivalent vented per "vent" action (m³)
 MASS = PAYLOAD_MASS + BALLAST_INITIAL  # Total structural mass (kg), used for ALT_MAX derivation
 VOL_MAX = 180.6             # Maximum balloon volume (m³) — gives ALT_MAX ≈ 40 km
 VOL_MIN = 0.1               # Minimum volume before deflation (m³)
@@ -87,6 +87,11 @@ MIN_START_DISTANCE = 500.0  # Minimum distance between start and goal on reset (
 INIT_VEL_SIGMA = 2.0       # Std dev of initial velocity perturbation (m/s)
 INIT_GAS_FRAC_RANGE = 0.05 # Max fractional deviation from neutral gas amount (±5%)
 INIT_BALLAST_LOSS_MAX = 0.5 # Max ballast (kg) that may have been spent during ascent
+
+# ----- DECISION INTERVAL -----
+# Agent acts once per interval; physics runs every DT within it.
+# 60 steps × DT=1s = 1 decision per minute.
+DECISION_INTERVAL = 60      # Physics steps per agent decision (s)
 
 # ----- CODE CONSTANTS -----
 SEED = 42                    # Random seed for reproducibility

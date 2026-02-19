@@ -12,6 +12,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMoni
 from sb3_contrib import QRDQN
 
 import environments  # registers the Balloon3D-v0 environment
+from environments.wrappers.decision_interval import DecisionIntervalWrapper
 from agents.utils import _gather_monitor_csvs, InfoProgressBar, TerminationTracker
 
 # ---- Config ----
@@ -45,8 +46,8 @@ POLICY_KWARGS = dict(
 )
 
 TOTAL_TIMESTEPS = 15_000_000
-EVAL_FREQ = 250_000
-REWARD_THRESHOLD = 4_800  # ~96% of max episode reward (5000); proves sustained station-keeping
+EVAL_FREQ = 50_000           # decisions (each = 60 physics steps); ~50k × 60 = 3M physics steps between evals
+REWARD_THRESHOLD = 83_000    # ~96% of max episode reward (86,400); proves sustained station-keeping
 
 # Environment config overrides (passed to Balloon3DEnv)
 ENV_CONFIG = dict(
@@ -80,6 +81,7 @@ N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))
 def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict = None) -> Monitor:
     cfg = {**ENV_CONFIG, **(config or {})}
     env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True, config=cfg)
+    env = DecisionIntervalWrapper(env)
     env = Monitor(env, filename=monitor_file)  # writes train_monitor.csv
     env.reset(seed=seed)
     return env
@@ -89,6 +91,7 @@ def _make_vec_env_fn(env_id: str, dim: int, seed: int, config: dict):
     """Return a picklable factory for SubprocVecEnv workers."""
     def _init():
         env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True, config=config)
+        env = DecisionIntervalWrapper(env)
         env = Monitor(env)
         env.reset(seed=seed)
         return env
@@ -139,7 +142,9 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
 
     # Evaluation env (separate Monitor file)
     eval_env = Monitor(
-        gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True, config=ENV_CONFIG),
+        DecisionIntervalWrapper(
+            gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True, config=ENV_CONFIG)
+        ),
         filename=os.path.join(SAVE_PATH, "eval_monitor.csv")
     )
 
@@ -197,17 +202,19 @@ def test(dim: int, use_gpu: bool = False) -> None:
 
     device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
-    # Human-render env for demo
-    test_config = {**ENV_CONFIG, "time_max": 2_000}
+    # Human-render env for demo (shorter episode for interactive viewing)
+    test_config = {**ENV_CONFIG, "time_max": 7_200}  # 2 hours of physics
     env: gym.Env = Monitor(
-        gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config=test_config)
+        DecisionIntervalWrapper(
+            gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config=test_config)
+        )
     )
 
     # Load model
     model: QRDQN = QRDQN.load(MODEL_PATH, device=device)
 
     # (Optional) inspect Q-values for a single obs
-    env_temp = Balloon3DEnv(dim=dim, render_mode=None, config=ENV_CONFIG)
+    env_temp = DecisionIntervalWrapper(Balloon3DEnv(dim=dim, render_mode=None, config=ENV_CONFIG))
     obs, _ = env_temp.reset(seed=42)
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)
     with torch.no_grad():

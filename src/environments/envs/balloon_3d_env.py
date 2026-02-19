@@ -119,7 +119,7 @@ class Balloon3DEnv(gym.Env):
     # sensible defaults – override by *config*
     DEFAULTS: Dict[str, Any] = dict(
         dim=3,                    # 1, 2 or 3 dimensions
-        time_max=5_000,           # steps per episode
+        time_max=86_400,          # physics steps per episode (24 hours at DT=1s)
         x_range=(-XY_MAX, XY_MAX),
         y_range=(-XY_MAX, XY_MAX),
         z_range=(0.0, ALT_MAX),
