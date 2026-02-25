@@ -4,7 +4,7 @@ import numpy as np
 from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
     G, R, VOL_MAX, VOL_MIN, VEL_MAX, M_HE, T_BALLOON,
-    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE,
+    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE_MOLES,
     ALT_DEFAULT, OSCILLATION_AMP, OSCILLATION_PERIOD, SPEED_EPS,
     MU_REF, T_REF, S_SUTH,
 )
@@ -176,22 +176,22 @@ class Balloon:
         if self.ballast_mass < 1e-10:
             self.ballast_mass = 0.0
 
-    def vent_gas(self, volume_equiv: float = VENT_RATE) -> None:
+    def vent_gas(self) -> None:
         """Vent helium to reduce buoyancy (irreversible).
 
-        *volume_equiv* is the volume of gas (m³) to remove at the current
-        ambient pressure.  Internally converted to moles via the ideal gas law.
+        Removes a fixed number of moles (VENT_RATE_MOLES) regardless of
+        altitude, giving consistent descent authority across the full operating
+        range. The rate is calibrated to match the old volume-based vent at
+        float altitude — see notes/altitude_control_instability.md.
         """
-        p_amb = self.atmosphere.pressure(self.pos[-1])
-        dn = p_amb * volume_equiv / (R * T_BALLOON)
-        self.n_gas = max(0.0, self.n_gas - dn)
+        self.n_gas = max(0.0, self.n_gas - VENT_RATE_MOLES)
 
     def inflate(self, delta: float) -> None:
         """Legacy helper — positive delta drops ballast, negative vents gas."""
         if delta > 0:
             self.drop_ballast(BALLAST_DROP)
         elif delta < 0:
-            self.vent_gas(abs(delta))
+            self.vent_gas()
 
     @property
     def is_deflated(self) -> bool:

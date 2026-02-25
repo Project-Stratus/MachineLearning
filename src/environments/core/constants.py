@@ -74,6 +74,14 @@ else:
     ALT_MAX = TROPOPAUSE_ALT + _SCALE_H_STRATO * np.log(_P_TROPO / _P_TARGET)
 
 ALT_DEFAULT = 0.5 * ALT_MAX  # Default starting altitude (m) — midpoint of operating range
+
+# Molar vent rate: removes a fixed number of moles per vent action, calibrated
+# to match the old volume-based rate at float altitude (ALT_DEFAULT). Descent
+# authority is now constant across the full operating range instead of degrading
+# exponentially with altitude. See notes/altitude_control_instability.md.
+_H_STRATO = R * T_TROPOPAUSE / (M_AIR * G)   # stratospheric pressure scale height (m)
+_P_FLOAT  = _P_TROPO * np.exp(-(ALT_DEFAULT - TROPOPAUSE_ALT) / _H_STRATO)
+VENT_RATE_MOLES = _P_FLOAT * VENT_RATE / (R * T_BALLOON)  # mol removed per vent action
 VEL_MAX = 200.0             # Maximum velocity (m/s) - physics clamp limit
 P_MAX = 1.0e5               # Maximum pressure (Pa)
 SPEED_EPS = 1e-12           # Speed threshold for drag computation (m/s²)

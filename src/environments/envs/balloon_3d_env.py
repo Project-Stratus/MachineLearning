@@ -91,7 +91,7 @@ from environments.render.pygame_render import PygameRenderer
 from environments.core.constants import (
     VOL_MAX, ALT_MAX, XY_MAX, VEL_MAX, P_MAX, DT,
     P0, M_AIR, G, RHO_0,
-    BALLAST_DROP, BALLAST_INITIAL, VENT_RATE,
+    BALLAST_DROP, BALLAST_INITIAL,
     MIN_START_DISTANCE,
     INIT_VEL_SIGMA, INIT_GAS_FRAC_RANGE, INIT_BALLAST_LOSS_MAX,
 )
@@ -125,7 +125,7 @@ class Balloon3DEnv(gym.Env):
         z_range=(0.0, ALT_MAX),
         wind_mag=5.0,            # max wind speed [m/s]
         wind_cells=20,           # grid for wind visualisation
-        vent_rate=VENT_RATE,      # gas volume equivalent vented per *vent* action (m³)
+        vent_rate_moles=None,     # reserved — vent rate now fixed in constants.py (VENT_RATE_MOLES)
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
         wind_layers=2,                # number of full wind rotations over altitude range (altitude_shear_2d only)
@@ -476,7 +476,7 @@ class Balloon3DEnv(gym.Env):
         if effect == 1:       # drop ballast → ascend
             self._balloon.drop_ballast(BALLAST_DROP)
         elif effect == -1:    # vent gas → descend
-            self._balloon.vent_gas(self.cfg["vent_rate"])
+            self._balloon.vent_gas()
 
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
         self.last_wind[:] = wind    # Cache for obs (copies before buffer reuse)
