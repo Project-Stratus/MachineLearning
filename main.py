@@ -19,10 +19,11 @@ if __name__ == "__main__":
     parser.add_argument('--hpc', action='store_true', help='HPC mode: disables progress bars for non-interactive SLURM jobs.')
     parser.add_argument('-d', '--dim', type=int, default=3, choices=[1,2,3], help='Dimensionality of the environment (1D, 2D or 3D).')
     parser.add_argument('-sf', '--save_fig', action='store_true', help='Save training figure to disk (only in train mode).')
+    parser.add_argument('--n-envs', type=int, default=None, help='Number of parallel environments (overrides auto-detected default). Use to limit memory on HPC.')
     args = parser.parse_args()
 
     if args.train:
-        df = qrdqn.train(dim=args.dim, use_gpu=args.gpu, hpc=args.hpc)
+        df = qrdqn.train(dim=args.dim, use_gpu=args.gpu, hpc=args.hpc, n_envs=args.n_envs)
         if args.save_fig:
             save_dir = "src/models/qr_dqn_model"
 

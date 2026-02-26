@@ -55,7 +55,7 @@ ENV_CONFIG = dict(
 )
 
 MAX_ENVS = max(8, os.cpu_count() - 2)
-N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))
+N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))  # overridden by train(n_envs=...)
 
 
 # def _gather_monitor_csvs(log_dir: str) -> pd.DataFrame:
@@ -116,7 +116,7 @@ def _build_vec_env(n_envs: int, env_id: str, dim: int, seed: int = SEED):
     return VecMonitor(venv, filename=monitor_file)
 
 
-def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False) -> pd.DataFrame:
+def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False, n_envs: int = None) -> pd.DataFrame:
     """
     Train QR-DQN on the same environment. Returns a DataFrame of episode returns/lengths.
     """
@@ -126,9 +126,10 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
 
     device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
-    print(f"Training with {N_ENVS} environments, dim={dim}.")
+    n = n_envs if n_envs is not None else N_ENVS
+    print(f"Training with {n} environments, dim={dim}.")
 
-    env = _build_vec_env(N_ENVS, ENVIRONMENT_NAME, dim=dim, seed=SEED)
+    env = _build_vec_env(n, ENVIRONMENT_NAME, dim=dim, seed=SEED)
 
     model = QRDQN(
         policy="MlpPolicy",

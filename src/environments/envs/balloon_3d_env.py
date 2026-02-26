@@ -76,11 +76,13 @@ to override any of them without sub-classing.
 """
 from __future__ import annotations
 
+import warnings
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from enum import Enum
 from typing import Literal, Dict, Any, Tuple
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import pygame
 
 from environments.core.balloon import Balloon

@@ -11,8 +11,10 @@ so you can reuse one instance across episodes or even different envs.
 from __future__ import annotations
 import math
 import os
+import warnings
 from typing import Tuple, Dict, Any
 import numpy as np
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import pygame
 
 
