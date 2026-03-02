@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
+from environments.core.constants import ALT_DEFAULT, ALT_MAX, SP_VOL_FIXED
 from environments.envs.balloon_3d_env import Balloon3DEnv
-from environments.core.constants import ALT_MAX
 
 
 class TestFullEpisodeRollout:
@@ -413,5 +413,158 @@ class TestGymCompatibility:
                 action = env.action_space.sample()
                 assert 0 <= action < 3
                 assert env.action_space.contains(action)
+        finally:
+            env.close()
+
+
+class TestSPEpisodeRollout:
+    """Integration tests for SP (superpressure + air ballast) episode rollouts."""
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("dim", [1, 2, 3])
+    def test_sp_episode_completes_all_dimensions(self, dim):
+        """SP full episode should complete without errors for all dimensions."""
+        env = Balloon3DEnv(dim=dim, render_mode=None,
+                           config={"time_max": 100, "balloon_type": "superpressure"})
+        try:
+            obs, _ = env.reset(seed=42)
+            done = False
+            steps = 0
+            while not done and steps < 200:
+                obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+                done = terminated or truncated
+                steps += 1
+                assert np.all(np.isfinite(obs))
+                assert np.isfinite(reward)
+            assert done, "SP episode should complete within step limit"
+        finally:
+            env.close()
+
+    @pytest.mark.integration
+    def test_sp_gym_make_works(self):
+        """Should be able to create SP environment via gym.make with BalloonSP3D-v0."""
+        import gymnasium as gym
+        env = gym.make("environments/BalloonSP3D-v0", dim=1, render_mode=None)
+        try:
+            obs, info = env.reset()
+            assert obs is not None
+            obs, reward, term, trunc, info = env.step(1)
+            assert obs is not None
+            assert np.isfinite(reward)
+        finally:
+            env.close()
+
+    @pytest.mark.integration
+    def test_sp_episode_determinism(self):
+        """Same seed and actions should produce identical SP episodes."""
+        actions = [0, 1, 2, 1, 0, 2, 1, 1, 0, 2]
+
+        def run_episode(seed):
+            env = Balloon3DEnv(dim=1, render_mode=None,
+                               config={"time_max": 100, "balloon_type": "superpressure"})
+            try:
+                obs, _ = env.reset(seed=seed)
+                observations = [obs.copy()]
+                for action in actions:
+                    obs, _, _, _, _ = env.step(action)
+                    observations.append(obs.copy())
+                return observations
+            finally:
+                env.close()
+
+        for o1, o2 in zip(run_episode(123), run_episode(123)):
+            assert np.allclose(o1, o2), "SP observations should be identical for same seed"
+
+
+class TestSPPhysicsConsistency:
+    """Physics consistency tests for SP balloon episodes."""
+
+    @pytest.mark.integration
+    def test_sp_pump_out_causes_rise_1d(self):
+        """Pumping air out repeatedly should cause SP balloon to rise in 1D.
+
+        The balloon is placed at ALT_DEFAULT (neutral-buoyancy with midpoint
+        bladder) so the passive restoring force is zero and pumping determines
+        the direction of motion.
+        """
+        env = Balloon3DEnv(dim=1, render_mode=None,
+                           config={"time_max": 200, "balloon_type": "superpressure"})
+        try:
+            env.reset(seed=42)
+            env._balloon.pos[-1] = ALT_DEFAULT   # start at neutral-buoyancy altitude
+            env._balloon.vel[-1] = 0.0
+            initial_alt = env._balloon.altitude
+            for _ in range(100):
+                env.step(2)   # effect +1 → pump_out → ascend
+            assert env._balloon.altitude > initial_alt, \
+                "SP balloon should rise after pumping air out"
+        finally:
+            env.close()
+
+    @pytest.mark.integration
+    def test_sp_pump_in_causes_fall_1d(self):
+        """Pumping air in repeatedly should cause SP balloon to fall in 1D.
+
+        The balloon is placed at ALT_DEFAULT (neutral-buoyancy with midpoint
+        bladder) so the passive restoring force is zero and pumping determines
+        the direction of motion.
+        """
+        env = Balloon3DEnv(dim=1, render_mode=None,
+                           config={"time_max": 200, "balloon_type": "superpressure"})
+        try:
+            env.reset(seed=42)
+            env._balloon.pos[-1] = ALT_DEFAULT   # start at neutral-buoyancy altitude
+            env._balloon.vel[-1] = 0.0
+            initial_alt = env._balloon.altitude
+            for _ in range(100):
+                env.step(0)   # effect -1 → pump_in → descend
+            assert env._balloon.altitude < initial_alt, \
+                "SP balloon should fall after pumping air in"
+        finally:
+            env.close()
+
+    @pytest.mark.integration
+    def test_sp_altitude_stays_positive_or_terminates(self):
+        """SP altitude should stay positive or episode should terminate."""
+        env = Balloon3DEnv(dim=1, render_mode=None,
+                           config={"time_max": 500, "balloon_type": "superpressure"})
+        try:
+            env.reset(seed=42)
+            for _ in range(500):
+                _, _, terminated, truncated, _ = env.step(0)  # pump_in repeatedly
+                if terminated:
+                    break
+                assert env._balloon.altitude >= 0.0, "SP altitude should never go negative"
+        finally:
+            env.close()
+
+    @pytest.mark.integration
+    def test_sp_volume_constant_throughout_episode(self):
+        """SP balloon volume should remain fixed throughout an entire episode."""
+        env = Balloon3DEnv(dim=1, render_mode=None,
+                           config={"time_max": 100, "balloon_type": "superpressure"})
+        try:
+            env.reset(seed=42)
+            for _ in range(100):
+                _, _, term, trunc, _ = env.step(env.action_space.sample())
+                assert env._balloon.volume == pytest.approx(SP_VOL_FIXED), \
+                    "SP volume should be fixed throughout episode"
+                if term or trunc:
+                    break
+        finally:
+            env.close()
+
+    @pytest.mark.integration
+    def test_sp_wind_affects_horizontal_motion(self):
+        """Wind should affect SP balloon horizontal motion the same as ZP."""
+        env = Balloon3DEnv(dim=2, render_mode=None,
+                           config={"time_max": 100, "balloon_type": "superpressure"})
+        try:
+            env.reset(seed=42)
+            initial_pos = env._balloon.pos[:2].copy()
+            for _ in range(50):
+                env.step(1)   # do nothing — let wind push
+            displacement = np.linalg.norm(env._balloon.pos[:2] - initial_pos)
+            assert displacement > 0, "Wind should cause horizontal displacement for SP balloon"
         finally:
             env.close()

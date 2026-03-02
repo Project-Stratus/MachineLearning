@@ -16,9 +16,11 @@ from environments.wrappers.decision_interval import DecisionIntervalWrapper
 from agents.utils import _gather_monitor_csvs, InfoProgressBar, TerminationTracker
 
 # ---- Config ----
-ENVIRONMENT_NAME = "environments/Balloon3D-v0"
-SAVE_PATH = "./src/models/qr_dqn_model/"
-MODEL_PATH = os.path.join(SAVE_PATH, "qr_dqn")
+_ENV_NAMES = {
+    "zero_pressure": "environments/Balloon3D-v0",
+    "superpressure":  "environments/BalloonSP3D-v0",
+}
+BASE_SAVE_PATH = "./src/models/qr_dqn_model/"
 VIDEO_PATH = "./figs/qr_dqn_figs/performance_video"  # (unused here but kept for parity)
 SEED = 42
 
@@ -78,8 +80,9 @@ N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))  # overridden by train(n_env
 #     return df
 
 
-def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict = None) -> Monitor:
-    cfg = {**ENV_CONFIG, **(config or {})}
+def _make_env(env_id: str, dim: int, seed: int, monitor_file: str, config: dict = None,
+              balloon_type: str = "zero_pressure") -> Monitor:
+    cfg = {**ENV_CONFIG, "balloon_type": balloon_type, **(config or {})}
     env = gym.make(env_id, render_mode=None, dim=dim, disable_env_checker=True, config=cfg)
     env = DecisionIntervalWrapper(env)
     env = Monitor(env, filename=monitor_file)  # writes train_monitor.csv
@@ -98,8 +101,10 @@ def _make_vec_env_fn(env_id: str, dim: int, seed: int, config: dict):
     return _init
 
 
-def _build_vec_env(n_envs: int, env_id: str, dim: int, seed: int = SEED):
-    cfg = dict(ENV_CONFIG)
+def _build_vec_env(n_envs: int, env_id: str, dim: int, seed: int = SEED,
+                   save_path: str = None, env_config: dict = None):
+    cfg = {**ENV_CONFIG, **(env_config or {})}
+    sp = save_path if save_path is not None else SAVE_PATH
     if n_envs != 1:
         if mp.get_start_method(allow_none=True) != "spawn":
             mp.set_start_method("spawn", force=True)
@@ -111,14 +116,14 @@ def _build_vec_env(n_envs: int, env_id: str, dim: int, seed: int = SEED):
     else:
         venv = DummyVecEnv([_make_vec_env_fn(env_id, dim, seed, cfg)])
 
-    os.makedirs(SAVE_PATH, exist_ok=True)
-    monitor_file = os.path.join(SAVE_PATH, "train_monitor")
+    os.makedirs(sp, exist_ok=True)
+    monitor_file = os.path.join(sp, "train_monitor")
     return VecMonitor(venv, filename=monitor_file)
 
 
-def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False, n_envs: int = None) -> pd.DataFrame:
+def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, hpc: bool = False, n_envs: int = None, balloon_type: str = "zero_pressure") -> pd.DataFrame:
     """
-    Train QR-DQN on the same environment. Returns a DataFrame of episode returns/lengths.
+    Train QR-DQN on the balloon environment. Returns a DataFrame of episode returns/lengths.
     """
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -126,15 +131,20 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
 
     device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
-    n = n_envs if n_envs is not None else N_ENVS
-    print(f"Training with {n} environments, dim={dim}.")
+    env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
+    save_path = os.path.join(BASE_SAVE_PATH, balloon_type)
+    model_path = os.path.join(save_path, "qr_dqn")
+    env_config = {**ENV_CONFIG, "balloon_type": balloon_type}
 
-    env = _build_vec_env(n, ENVIRONMENT_NAME, dim=dim, seed=SEED)
+    n = n_envs if n_envs is not None else N_ENVS
+    print(f"Training with {n} environments, dim={dim}, balloon_type={balloon_type}.")
+
+    env = _build_vec_env(n, env_name, dim=dim, seed=SEED, save_path=save_path, env_config=env_config)
 
     model = QRDQN(
         policy="MlpPolicy",
         env=env,
-        tensorboard_log=SAVE_PATH,
+        tensorboard_log=save_path,
         device=device,
         **TRAIN_CFG,
         policy_kwargs=POLICY_KWARGS,
@@ -144,9 +154,9 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
     # Evaluation env (separate Monitor file)
     eval_env = Monitor(
         DecisionIntervalWrapper(
-            gym.make(ENVIRONMENT_NAME, render_mode=None, dim=dim, disable_env_checker=True, config=ENV_CONFIG)
+            gym.make(env_name, render_mode=None, dim=dim, disable_env_checker=True, config=env_config)
         ),
-        filename=os.path.join(SAVE_PATH, "eval_monitor.csv")
+        filename=os.path.join(save_path, "eval_monitor.csv")
     )
 
     stop_cb = StopTrainingOnRewardThreshold(reward_threshold=REWARD_THRESHOLD, verbose=1)
@@ -154,8 +164,8 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
     eval_cb = EvalCallback(
         eval_env,
         callback_on_new_best=stop_cb,
-        best_model_save_path=SAVE_PATH,
-        log_path=SAVE_PATH,
+        best_model_save_path=save_path,
+        log_path=save_path,
         eval_freq=EVAL_FREQ,
         deterministic=True,    # greedy action at eval
         render=False
@@ -172,8 +182,8 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
         callbacks.insert(0, tqdm_cb)
     callback = CallbackList(callbacks)
 
-    model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"QRDQN_run_dim{dim}")
-    model.save(MODEL_PATH)
+    model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, tb_log_name=f"QRDQN_run_{balloon_type}_dim{dim}")
+    model.save(model_path)
     env.close()
     eval_env.close()
 
@@ -182,40 +192,46 @@ def train(dim: int, verbose: int = 0, render_freq=None, use_gpu: bool = False, h
     best_reward = eval_cb.best_mean_reward
     print(f"\n{'='*50}")
     print(f"Training complete {'(early stopped)' if early_stopped else '(full run)'}")
+    print(f"  Balloon type:     {balloon_type}")
     print(f"  Best eval reward: {best_reward:.2f}")
     print(f"  Total timesteps:  {model.num_timesteps:,} / {TOTAL_TIMESTEPS:,}")
-    print(f"  Model saved to:   {os.path.abspath(MODEL_PATH)}")
+    print(f"  Model saved to:   {os.path.abspath(model_path)}")
     if hpc:
         print(f"  Device:           {device}")
     print(f"{'='*50}\n")
 
-    return _gather_monitor_csvs(SAVE_PATH)
+    return _gather_monitor_csvs(save_path)
 
 
-def test(dim: int, use_gpu: bool = False) -> None:
+def test(dim: int, use_gpu: bool = False, balloon_type: str = "zero_pressure") -> None:
     """
     Load the saved QR-DQN and run a few episodes with greedy actions.
     Mirrors your PPO test loop (minus policy distribution prints).
     """
     import pygame
     from environments.envs.balloon_3d_env import Actions  # your enum
-    from environments.envs.balloon_3d_env import Balloon3DEnv
+    from environments.envs.balloon_3d_env import Balloon3DEnv, BalloonSP3DEnv
+    _EnvCls = BalloonSP3DEnv if balloon_type == "superpressure" else Balloon3DEnv
 
     device = torch.device("cuda") if (use_gpu and torch.cuda.is_available()) else torch.device("cpu")
 
+    env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
+    model_path = os.path.join(BASE_SAVE_PATH, balloon_type, "qr_dqn")
+    env_config = {**ENV_CONFIG, "balloon_type": balloon_type}
+
     # Human-render env for demo (shorter episode for interactive viewing)
-    test_config = {**ENV_CONFIG, "time_max": 7_200}  # 2 hours of physics
+    test_config = {**env_config, "time_max": 7_200}  # 2 hours of physics
     env: gym.Env = Monitor(
         DecisionIntervalWrapper(
-            gym.make(ENVIRONMENT_NAME, render_mode="human", dim=dim, disable_env_checker=True, config=test_config)
+            gym.make(env_name, render_mode="human", dim=dim, disable_env_checker=True, config=test_config)
         )
     )
 
     # Load model
-    model: QRDQN = QRDQN.load(MODEL_PATH, device=device)
+    model: QRDQN = QRDQN.load(model_path, device=device)
 
     # (Optional) inspect Q-values for a single obs
-    env_temp = DecisionIntervalWrapper(Balloon3DEnv(dim=dim, render_mode=None, config=ENV_CONFIG))
+    env_temp = DecisionIntervalWrapper(_EnvCls(dim=dim, render_mode=None, config=env_config))
     obs, _ = env_temp.reset(seed=42)
     obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=model.device).unsqueeze(0)
     with torch.no_grad():
@@ -240,19 +256,19 @@ def test(dim: int, use_gpu: bool = False) -> None:
 
             pos = env.unwrapped._balloon.pos
             if env.unwrapped.dim == 1:
-                pos_str = f"z={pos[0]:+.1f}"
+                pos_str = f"z={pos[0]:+8.1f}"
             elif env.unwrapped.dim == 2:
-                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f}"
+                pos_str = f"{pos[0]:+8.1f},{pos[1]:+8.1f}"
             else:
-                pos_str = f"{pos[0]:+.1f},{pos[1]:+.1f},{pos[2]:+.1f}"
+                pos_str = f"{pos[0]:+8.1f},{pos[1]:+8.1f},{pos[2]:+8.1f}"
 
             c = info.get("reward_components", {})
             print(
-                f"E{episode+1}|S{steps:>5}|A:{act:<3}"
+                f"E{episode+1:<2}|S{steps:>5}|A:{act:<3}"
                 f"|Pos:{pos_str}"
-                f"|R:{reward:+.3f}"
-                f"|stn:{c.get('station',0):.3f}"
-                f" dec:{c.get('decay',0):.3f}"
+                f"|R:{reward:+8.3f}"
+                f"|stn:{c.get('station',0):6.3f}"
+                f" dec:{c.get('decay',0):6.3f}"
             )
 
             state = next_state

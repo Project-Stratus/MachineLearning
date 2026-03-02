@@ -17,3 +17,8 @@ register(
     id="environments/Balloon3D-v0",
     entry_point="environments.envs:Balloon3DEnv",
 )
+
+register(
+    id="environments/BalloonSP3D-v0",
+    entry_point="environments.envs:BalloonSP3DEnv",
+)

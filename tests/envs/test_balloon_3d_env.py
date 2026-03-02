@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+from environments.core.balloon import BalloonSP
+from environments.core.constants import SP_VOL_FIXED
 from environments.envs.balloon_3d_env import Balloon3DEnv, Actions
 from tests.conftest import expected_obs_size
 
@@ -375,3 +377,95 @@ class TestActionsEnum:
         assert Actions(1) == Actions.drop_ballast
         assert Actions(0) == Actions.nothing
         assert Actions(-1) == Actions.vent
+
+
+class TestBalloon3DEnvSP:
+    """Tests specific to the SP (superpressure + air ballast) balloon type."""
+
+    def test_sp_reset_creates_balloon_sp(self, env_sp_1d):
+        """Reset should create a BalloonSP instance for SP type."""
+        env_sp_1d.reset(seed=42)
+        assert isinstance(env_sp_1d._balloon, BalloonSP)
+
+    def test_sp_balloon_has_air_bladder(self, env_sp_1d):
+        """SP balloon should have air_bladder_mass attribute."""
+        env_sp_1d.reset(seed=42)
+        assert hasattr(env_sp_1d._balloon, "air_bladder_mass")
+
+    def test_sp_obs_size_matches_zp(self):
+        """SP and ZP environments should have identical observation size."""
+        for dim in [1, 2, 3]:
+            env_zp = Balloon3DEnv(dim=dim, config={"time_max": 5})
+            env_sp = Balloon3DEnv(dim=dim, config={"time_max": 5, "balloon_type": "superpressure"})
+            try:
+                assert env_zp.observation_space.shape == env_sp.observation_space.shape
+                assert env_zp.observation_space.shape == (expected_obs_size(dim),)
+            finally:
+                env_zp.close()
+                env_sp.close()
+
+    def test_sp_action_pump_out_reduces_mass(self, env_sp_1d):
+        """Action 2 (effect +1) should call pump_out → reduce balloon mass."""
+        env_sp_1d.reset(seed=42)
+        mass_before = env_sp_1d._balloon.mass
+        env_sp_1d.step(2)   # effect +1 → pump_out
+        assert env_sp_1d._balloon.mass < mass_before
+
+    def test_sp_action_pump_in_increases_mass(self, env_sp_1d):
+        """Action 0 (effect -1) should call pump_in → increase balloon mass."""
+        env_sp_1d.reset(seed=42)
+        mass_before = env_sp_1d._balloon.mass
+        env_sp_1d.step(0)   # effect -1 → pump_in
+        assert env_sp_1d._balloon.mass > mass_before
+
+    def test_sp_action_nothing_no_mass_change(self, env_sp_1d):
+        """Action 1 (nothing) should not change balloon mass for SP."""
+        env_sp_1d.reset(seed=42)
+        mass_before = env_sp_1d._balloon.mass
+        env_sp_1d.step(1)
+        assert env_sp_1d._balloon.mass == pytest.approx(mass_before)
+
+    def test_sp_volume_constant_through_all_actions(self, env_sp_1d):
+        """SP balloon volume should never change regardless of action."""
+        env_sp_1d.reset(seed=42)
+        for action in [0, 1, 2]:
+            env_sp_1d.step(action)
+            assert env_sp_1d._balloon.volume == pytest.approx(SP_VOL_FIXED)
+
+    def test_sp_deflated_never_terminates(self, env_sp_1d):
+        """SP balloon should never terminate with 'Deflated' reason."""
+        env_sp_1d.reset(seed=42)
+        for _ in range(200):
+            _, _, terminated, truncated, info = env_sp_1d.step(0)  # pump_in
+            reason = info.get("termination_reason", "")
+            assert reason != "Deflated (helium fully lost)"
+            if terminated or truncated:
+                break
+
+    def test_sp_ballast_empty_never_terminates(self, env_sp_1d):
+        """SP balloon should never terminate with 'Ballast exhausted' reason."""
+        env_sp_1d.reset(seed=42)
+        for _ in range(200):
+            _, _, terminated, truncated, info = env_sp_1d.step(2)  # pump_out
+            reason = info.get("termination_reason", "")
+            assert reason != "Ballast exhausted (no ballast remaining)"
+            if terminated or truncated:
+                break
+
+    def test_sp_action_lut_same_as_zp(self, env_sp_any_dim):
+        """Action index→effect mapping should be identical for ZP and SP."""
+        env, _ = env_sp_any_dim
+        assert env._action_lut[0] == -1   # descend
+        assert env._action_lut[1] == 0    # nothing
+        assert env._action_lut[2] == 1    # ascend
+
+    def test_sp_all_actions_produce_valid_obs(self, env_sp_any_dim):
+        """All three actions should produce finite in-bounds observations for SP."""
+        env, dim = env_sp_any_dim
+        for action in range(3):
+            env.reset(seed=42)
+            obs, reward, term, trunc, info = env.step(action)
+            assert np.all(np.isfinite(obs))
+            assert np.isfinite(reward)
+            assert obs.shape == (expected_obs_size(dim),)
+            assert env.observation_space.contains(obs)

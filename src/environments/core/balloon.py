@@ -7,6 +7,7 @@ from environments.core.constants import (
     PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE_MOLES,
     ALT_DEFAULT, OSCILLATION_AMP, OSCILLATION_PERIOD, SPEED_EPS,
     MU_REF, T_REF, S_SUTH,
+    SP_VOL_FIXED, SP_PAYLOAD_MASS, AIR_PUMP_RATE, AIR_BLADDER_MAX, AIR_BLADDER_INITIAL,
 )
 
 try:
@@ -361,6 +362,108 @@ class Balloon:
 
         f_net = buoy_weight + drag + ext
         return f_net / self.mass
+
+
+class BalloonSP(Balloon):
+    """Superpressure + air ballast balloon model.
+
+    The helium envelope is sealed and fixed in volume (SP_VOL_FIXED).  Buoyancy
+    changes only because ρ_air(h) changes with altitude.  An internal air
+    bladder provides symmetric, reversible altitude control:
+
+    - Pump air **in**  → heavier → descend
+    - Pump air **out** → lighter → ascend
+
+    Passive stability
+    -----------------
+    F_buoy(h) = ρ_air(h) · g · V_FIXED.  Since ρ_air decreases with altitude
+    and V_FIXED is constant, dF_net/dh < 0 — a genuine restoring force toward
+    the float altitude (unlike the ZP balloon which is neutrally stable).
+
+    Integration
+    -----------
+    Inherits the full Verlet integration from Balloon.  Only ``dynamic_volume``
+    and ``mass`` are overridden so that ``physics_step_numba`` receives the
+    correct (constant) volume and the correct (variable, air-bladder-dependent)
+    mass.
+    """
+
+    def __init__(
+        self,
+        dim: int = 1,
+        payload_mass: float = SP_PAYLOAD_MASS,
+        position=None,
+        velocity=None,
+        atmosphere: Atmosphere | None = None,
+    ):
+        # Skip Balloon.__init__ — completely different state model.
+        self.dim = dim
+        self.payload_mass = payload_mass
+        self.atmosphere = atmosphere if atmosphere is not None else Atmosphere()
+
+        if position is None:
+            position = np.zeros(dim, dtype=float)
+            position[-1] = ALT_DEFAULT
+        if velocity is None:
+            velocity = np.zeros(dim, dtype=float)
+
+        self.pos = np.ascontiguousarray(position, dtype=np.float64)
+        self.vel = np.ascontiguousarray(velocity, dtype=np.float64)
+        self._zero_vec = np.zeros(dim, dtype=np.float64)
+        self.t = 0.0
+        self.oscillate = False
+
+        # Fixed outer volume
+        self.volume_fixed = SP_VOL_FIXED
+
+        # Air bladder starts at midpoint for equal up/down authority
+        self.air_bladder_mass = AIR_BLADDER_INITIAL
+
+        # Fixed helium mass: ensures neutral buoyancy at ALT_DEFAULT with bladder
+        # at midpoint.  Derived from: ρ_air(ALT_DEFAULT) · V_FIXED = m_total.
+        rho_air = self.atmosphere.density(ALT_DEFAULT)
+        self.m_he_fixed = rho_air * SP_VOL_FIXED - payload_mass - AIR_BLADDER_INITIAL
+
+    # -- Variable mass ---------------------------------------------------------
+    @property
+    def mass(self) -> float:
+        """Total mass: payload + fixed helium + air bladder."""
+        return self.payload_mass + self.m_he_fixed + self.air_bladder_mass
+
+    # -- Fixed volume ----------------------------------------------------------
+    def dynamic_volume(self, t: float) -> float:
+        """Always returns the fixed envelope volume."""
+        return self.volume_fixed
+
+    # -- Bladder state flags ---------------------------------------------------
+    @property
+    def is_deflated(self) -> bool:
+        """Always False — SP envelope cannot deflate."""
+        return False
+
+    @property
+    def is_ballast_empty(self) -> bool:
+        """Always False — SP has no expendable ballast."""
+        return False
+
+    @property
+    def is_bladder_full(self) -> bool:
+        """True when air bladder is at maximum capacity."""
+        return self.air_bladder_mass >= AIR_BLADDER_MAX
+
+    @property
+    def is_bladder_empty(self) -> bool:
+        """True when air bladder has been fully emptied."""
+        return self.air_bladder_mass <= 0.0
+
+    # -- Bladder control -------------------------------------------------------
+    def pump_in(self, amount: float = AIR_PUMP_RATE) -> None:
+        """Pump air into bladder → heavier → descend (reversible)."""
+        self.air_bladder_mass = min(AIR_BLADDER_MAX, self.air_bladder_mass + amount)
+
+    def pump_out(self, amount: float = AIR_PUMP_RATE) -> None:
+        """Pump air out of bladder → lighter → ascend (reversible)."""
+        self.air_bladder_mass = max(0.0, self.air_bladder_mass - amount)
 
 
 # ---- Module-level helpers (pure Python, used by Balloon methods) ------------

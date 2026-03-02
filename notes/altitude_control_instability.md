@@ -191,6 +191,28 @@ pumped out again. Neither resource is permanently consumed.
 
 ### 5.2 Why the cycle breaks
 
+**Correction**: the notes previously stated that "a superpressure balloon is
+also neutrally stable in the stratosphere." This is incorrect.
+
+For the SP balloon, buoyancy force is:
+
+$$F_{buoy}(h) = \rho_{air}(h) \cdot g \cdot V_{fixed}$$
+
+Since $V_{fixed}$ is constant and $\rho_{air}$ decreases with altitude:
+
+$$\frac{dF_{net}}{dh} = \frac{d\rho_{air}}{dh} \cdot g \cdot V_{fixed} < 0$$
+
+This gives a **genuine passive restoring force** toward the float altitude —
+the opposite of neutral stability.  A displaced SP balloon experiences a
+restoring force proportional to the density gradient and the fixed volume.
+With the parameters in `constants.py` ($V_{fixed} = 100\,\text{m}^3$,
+float altitude $h_0 \approx 19{,}550\,\text{m}$):
+
+- Scale height $H_s \approx 6{,}340\,\text{m}$ → density gradient
+  $|d\rho/dh| = \rho(h_0) / H_s \approx 1.39 \times 10^{-5}\,\text{kg/m}^4$
+- Spring constant: $k = |d\rho/dh| \cdot g \cdot V_{fixed} \approx 0.0136\,\text{N/m}$
+- Natural period: $T = 2\pi\sqrt{m/k} \approx 165\,\text{s}$ (~2.75 min)
+
 | Property | Zero-pressure (Stratus) | Superpressure + air ballast (Loon) |
 |---|---|---|
 | Volume | Varies with $P(h)$ — grows near ceiling | Fixed |
@@ -198,30 +220,51 @@ pumped out again. Neither resource is permanently consumed.
 | Descent action | Vent helium (irreversible) | Pump air in (reversible) |
 | Descent authority at altitude | Degrades exponentially | Constant |
 | Resource budget | Two finite consumables | Unlimited (solar-powered pump) |
-| Neutral stability | Yes — no restoring force | Yes — same property |
+| Neutral stability | Yes — no restoring force | **No — passive restoring force (period ~165 s)** |
 | Over-correction cost | Permanent resource loss | Zero |
 
-The air ballast model does not eliminate the neutral stability problem —
-a superpressure balloon is also neutrally stable in the stratosphere — but
-it eliminates the resource depletion and the asymmetric authority that
-cause the pop-crash cycle in practice.
+The SP model removes all three structural problems: asymmetry, irreversibility,
+**and** neutral stability.  The passive restoring force means a balloon with a
+correctly-sized helium charge will naturally stay near its float altitude,
+dramatically reducing the pop and crash rate even before the agent learns
+anything.
 
 ---
 
-## 6. Implications for Project Stratus
+## 6. Project Stratus Status
 
-The current physics model accurately represents a zero-pressure balloon, which
-is the harder control problem. The 67.7% pop rate in training is not primarily
-a learning failure — it reflects a genuine physical asymmetry that the agent
-must overcome. Key consequences:
+### 6.1 Mole-based vent fix (applied)
 
-- **More vent actions are needed than ballast drops** to maintain balance, so
-  the optimal policy is heavily biased toward venting over ballasting.
-- **Training at higher altitudes is harder** than lower altitudes because vent
-  authority degrades. The agent's difficulty scales with how often it is near
-  $h_{max}$.
-- **The problem becomes significantly more tractable** if the model is updated
-  to superpressure + air ballast before scaling to realistic atmospheric data,
-  since the symmetric, reversible action space will make the control policy
-  learnable with fewer samples and produce a more directly transferable
-  skill to real balloon systems following the Loon design.
+The volume-based vent rate described in sections 3.1–3.3 has been replaced with
+a **mole-based vent rate** (`VENT_RATE_MOLES` in `constants.py`).  The rate is
+calibrated to match the old volume-based vent at float altitude ($h_{default}$),
+so descent authority is now constant across the full operating range instead of
+degrading exponentially with altitude.  The force asymmetry ratio in section 3.3
+is now approximately **2.1:1** at float altitude (down from exponential growth
+near the ceiling), but the asymmetry is still non-trivial.
+
+### 6.2 Parallel balloon models
+
+Both the zero-pressure (ZP) and superpressure (SP) models are now implemented in
+parallel.  Select the model via the `--balloon-type` CLI argument:
+
+```bash
+python main.py --train --dim 3 --balloon-type zero_pressure   # original ZP model
+python main.py --train --dim 3 --balloon-type superpressure   # SP + air ballast
+```
+
+The observation space size (`5·dim + 4`) and network architecture are identical
+for both types, allowing direct comparison of training curves.  Trained models
+are saved to separate subdirectories (`zero_pressure/` and `superpressure/`
+under `src/models/qr_dqn_model/`).
+
+### 6.3 Expected SP advantages in training
+
+- **No pop/crash from resource exhaustion** — the SP balloon never deflates or
+  runs out of ballast.  The only terminations are altitude bounds (physically
+  unlikely given the passive restoring force) and XY out-of-bounds.
+- **Symmetric authority** — pump-in and pump-out produce exactly equal and
+  opposite force changes at all altitudes.
+- **Passive stability** — even a random or frozen policy keeps the balloon near
+  its float altitude, giving the agent a stable platform to learn horizontal
+  navigation on top of.

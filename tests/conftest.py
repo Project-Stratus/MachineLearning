@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from environments.core.atmosphere import Atmosphere
-from environments.core.balloon import Balloon
+from environments.core.balloon import Balloon, BalloonSP
+from environments.core.constants import ALT_DEFAULT
 from environments.core.wind_field import WindField
 from environments.envs.balloon_3d_env import Balloon3DEnv
 
@@ -107,6 +108,46 @@ def env_short_episode():
 
 
 # -----------------------------------------------------------------------------
+# SP Balloon fixtures
+# -----------------------------------------------------------------------------
+@pytest.fixture
+def balloon_sp_1d(atmosphere):
+    """1D SP balloon at default altitude."""
+    return BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
+
+
+@pytest.fixture
+def balloon_sp_3d(atmosphere):
+    """3D SP balloon at default position."""
+    return BalloonSP(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, ALT_DEFAULT])
+
+
+@pytest.fixture(params=[1, 2, 3])
+def env_sp_any_dim(request):
+    """Parametrized SP environment for all dimensions."""
+    dim = request.param
+    env = Balloon3DEnv(dim=dim, render_mode=None, config={"time_max": 100, "balloon_type": "superpressure"})
+    yield env, dim
+    env.close()
+
+
+@pytest.fixture
+def env_sp_1d():
+    """1D SP environment."""
+    env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 100, "balloon_type": "superpressure"})
+    yield env
+    env.close()
+
+
+@pytest.fixture
+def env_sp_3d():
+    """3D SP environment."""
+    env = Balloon3DEnv(dim=3, render_mode=None, config={"time_max": 100, "balloon_type": "superpressure"})
+    yield env
+    env.close()
+
+
+# -----------------------------------------------------------------------------
 # Utility fixtures
 # -----------------------------------------------------------------------------
 @pytest.fixture
@@ -118,6 +159,10 @@ def rng():
 def expected_obs_size(dim: int) -> int:
     """Calculate expected observation size for a given dimension.
 
-    Observation layout: goal(d) + volume(1) + position(d) + delta(d) + velocity(d) + pressure(1) + wind(d) + ballast(1) + gas(1)
+    Layout (identical for ZP and SP):
+      goal(d) + volume(1) + position(d) + delta(d) + velocity(d) + pressure(1) + wind(d) + resource_a(1) + resource_b(1)
+
+    ZP resource slots: ballast_remaining, gas_remaining (both irreversible).
+    SP resource slots: bladder_fill_fraction, bladder_headroom (complement, reversible).
     """
     return 5 * dim + 4

@@ -20,12 +20,16 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--dim', type=int, default=3, choices=[1,2,3], help='Dimensionality of the environment (1D, 2D or 3D).')
     parser.add_argument('-sf', '--save_fig', action='store_true', help='Save training figure to disk (only in train mode).')
     parser.add_argument('--n-envs', type=int, default=None, help='Number of parallel environments (overrides auto-detected default). Use to limit memory on HPC.')
+    parser.add_argument('--balloon-type', type=str, default='zero_pressure',
+                        choices=['zero_pressure', 'superpressure'],
+                        help='Balloon physics model to train/test.')
     args = parser.parse_args()
 
     if args.train:
-        df = qrdqn.train(dim=args.dim, use_gpu=args.gpu, hpc=args.hpc, n_envs=args.n_envs)
+        df = qrdqn.train(dim=args.dim, use_gpu=args.gpu, hpc=args.hpc, n_envs=args.n_envs,
+                         balloon_type=args.balloon_type)
         if args.save_fig:
-            save_dir = "src/models/qr_dqn_model"
+            save_dir = f"src/models/qr_dqn_model/{args.balloon_type}"
 
             plt.figure(figsize=(10, 6))
             plt.plot(df["global_episode"], df["r"], alpha=0.4, label="Episode reward")
@@ -33,12 +37,12 @@ if __name__ == "__main__":
             plt.plot(df["global_episode"], rolling, color="black", linestyle="--", linewidth=1.5, label="100-episode avg")
             plt.xlabel("Episode")
             plt.ylabel("Reward")
-            plt.title("QR-DQN Training Reward Curve")
+            plt.title(f"QR-DQN Training Reward Curve ({args.balloon_type})")
             plt.legend()
             plt.grid()
-            plt.savefig(f"{save_dir}/training_curve_dim{args.dim}.png")
+            plt.savefig(f"{save_dir}/training_curve_dim{args.dim}_{args.balloon_type}.png")
             plt.close()
-            print(f"Training figure saved to {save_dir}/training_curve_dim{args.dim}.png")
+            print(f"Training figure saved to {save_dir}/training_curve_dim{args.dim}_{args.balloon_type}.png")
 
             eval_file = f"{save_dir}/evaluations.npz"
             if Path(eval_file).exists():
@@ -51,11 +55,11 @@ if __name__ == "__main__":
                 plt.fill_between(timesteps, mean_r - std_r, mean_r + std_r, alpha=0.2)
                 plt.xlabel("Timestep")
                 plt.ylabel("Reward")
-                plt.title("QR-DQN Evaluation Reward Curve")
+                plt.title(f"QR-DQN Evaluation Reward Curve ({args.balloon_type})")
                 plt.legend()
                 plt.grid()
-                plt.savefig(f"{save_dir}/eval_curve_dim{args.dim}.png")
+                plt.savefig(f"{save_dir}/eval_curve_dim{args.dim}_{args.balloon_type}.png")
                 plt.close()
-                print(f"Eval figure saved to {save_dir}/eval_curve_dim{args.dim}.png")
+                print(f"Eval figure saved to {save_dir}/eval_curve_dim{args.dim}_{args.balloon_type}.png")
     else:
-        qrdqn.test(dim=args.dim, use_gpu=args.gpu)
+        qrdqn.test(dim=args.dim, use_gpu=args.gpu, balloon_type=args.balloon_type)

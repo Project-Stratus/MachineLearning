@@ -103,3 +103,11 @@ DECISION_INTERVAL = 60      # Physics steps per agent decision (s)
 
 # ----- CODE CONSTANTS -----
 SEED = 42                    # Random seed for reproducibility
+
+# ----- SUPERPRESSURE + AIR BALLAST MODEL -----
+SP_VOL_FIXED        = 100.0             # Fixed outer volume (m³)
+SP_PAYLOAD_MASS     = 2.0               # Same as ZP for comparability (kg)
+AIR_PUMP_RATE       = 0.01              # Air mass pumped per action (kg) — equals BALLAST_DROP for force symmetry
+AIR_BLADDER_MAX     = 5.0              # Maximum air mass in bladder (kg)
+AIR_BLADDER_INITIAL = AIR_BLADDER_MAX / 2  # Start at midpoint for equal up/down authority (2.5 kg)
+# m_he_fixed is computed dynamically in BalloonSP.__init__ to ensure neutral buoyancy at ALT_DEFAULT

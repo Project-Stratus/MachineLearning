@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from environments.core.constants import SP_VOL_FIXED, VOL_MAX, AIR_BLADDER_MAX
 from environments.envs.balloon_3d_env import Balloon3DEnv
 from tests.conftest import expected_obs_size
 
@@ -283,3 +284,87 @@ class TestFullCoordsHelper:
         assert x == 100.0
         assert y == 200.0
         assert z == 300.0
+
+
+class TestSPObservationFeatures:
+    """Tests for SP-specific observation content.
+
+    Verifies that the two resource slots carry bladder fill fraction and
+    its complement, and that the volume slot is always the fixed constant.
+    """
+
+    def test_sp_obs_size_equals_zp_for_all_dims(self):
+        """SP observation size should match ZP for all dimensions."""
+        for dim in [1, 2, 3]:
+            env_zp = Balloon3DEnv(dim=dim, config={"time_max": 5})
+            env_sp = Balloon3DEnv(dim=dim, config={"time_max": 5, "balloon_type": "superpressure"})
+            try:
+                obs_zp, _ = env_zp.reset(seed=42)
+                obs_sp, _ = env_sp.reset(seed=42)
+                assert obs_zp.shape == obs_sp.shape == (expected_obs_size(dim),)
+            finally:
+                env_zp.close()
+                env_sp.close()
+
+    def test_sp_volume_obs_is_fixed_fraction(self, env_sp_1d):
+        """SP volume observation should always be SP_VOL_FIXED / VOL_MAX."""
+        expected = SP_VOL_FIXED / VOL_MAX
+        env_sp_1d.reset(seed=42)
+        # dim=1 → volume slot is at index 1 (after goal[0])
+        obs = env_sp_1d._get_obs()
+        assert obs[1] == pytest.approx(expected, rel=1e-4)
+
+    def test_sp_volume_obs_constant_across_steps(self, env_sp_1d):
+        """SP volume observation should not change over an episode."""
+        expected = SP_VOL_FIXED / VOL_MAX
+        env_sp_1d.reset(seed=42)
+        for _ in range(20):
+            obs, _, term, trunc, _ = env_sp_1d.step(env_sp_1d.action_space.sample())
+            assert obs[1] == pytest.approx(expected, rel=1e-4)
+            if term or trunc:
+                break
+
+    def test_sp_resource_slots_are_bladder_fractions(self, env_sp_1d):
+        """SP obs[-2] = bladder_fill_frac, obs[-1] = bladder_headroom."""
+        env_sp_1d.reset(seed=42)
+        obs = env_sp_1d._get_obs()
+        bladder_frac = env_sp_1d._balloon.air_bladder_mass / AIR_BLADDER_MAX
+        assert obs[-2] == pytest.approx(bladder_frac, rel=1e-5)
+        assert obs[-1] == pytest.approx(1.0 - bladder_frac, rel=1e-5)
+
+    def test_sp_resource_slots_sum_to_one(self, env_sp_1d):
+        """SP resource obs slots should always sum to 1.0."""
+        env_sp_1d.reset(seed=42)
+        for _ in range(20):
+            obs, _, term, trunc, _ = env_sp_1d.step(env_sp_1d.action_space.sample())
+            assert obs[-2] + obs[-1] == pytest.approx(1.0, abs=1e-5)
+            if term or trunc:
+                break
+
+    def test_sp_resource_obs_changes_when_pumping(self, env_sp_1d):
+        """Pumping air in should increase bladder fill fraction in observation."""
+        env_sp_1d.reset(seed=42)
+        obs_before, _, _, _, _ = env_sp_1d.step(1)   # nothing
+        obs_after, _, _, _, _ = env_sp_1d.step(0)    # pump_in → more mass → higher fill
+        assert obs_after[-2] > obs_before[-2]
+        assert obs_after[-1] < obs_before[-1]
+
+    def test_sp_obs_in_bounds_after_many_pump_in(self, env_sp_1d):
+        """Resource obs should stay in [0, 1] even when bladder saturates."""
+        env_sp_1d.reset(seed=42)
+        for _ in range(600):  # far more than enough to fill bladder
+            obs, _, term, trunc, _ = env_sp_1d.step(0)  # pump_in
+            assert 0.0 <= obs[-2] <= 1.0
+            assert 0.0 <= obs[-1] <= 1.0
+            if term or trunc:
+                break
+
+    def test_sp_obs_in_bounds_after_many_pump_out(self, env_sp_1d):
+        """Resource obs should stay in [0, 1] even when bladder empties."""
+        env_sp_1d.reset(seed=42)
+        for _ in range(300):  # far more than enough to empty bladder
+            obs, _, term, trunc, _ = env_sp_1d.step(2)  # pump_out
+            assert 0.0 <= obs[-2] <= 1.0
+            assert 0.0 <= obs[-1] <= 1.0
+            if term or trunc:
+                break

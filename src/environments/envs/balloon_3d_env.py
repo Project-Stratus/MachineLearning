@@ -22,14 +22,15 @@ Action space
 =========
 Discrete(3) with action indices 0, 1, 2 mapped to effects:
 
-    Index | Effect | Description
-    ------|--------|--------------------------------------
-      0   |   -1   | Vent gas (release helium → descend)
-      1   |    0   | Do nothing
-      2   |   +1   | Drop ballast (reduce weight → ascend)
+    Index | Effect | ZP (zero_pressure)              | SP (superpressure)
+    ------|--------|---------------------------------|--------------------------
+      0   |   -1   | Vent helium → descend           | Pump air in → descend
+      1   |    0   | Do nothing                      | Do nothing
+      2   |   +1   | Drop ballast → ascend           | Pump air out → ascend
 
-Both actions are irreversible: vented helium and dropped ballast
-cannot be recovered.  The mapping is defined in `_action_lut`.
+ZP actions are irreversible (finite resource budget).
+SP actions are reversible (air pumped in can be pumped out again).
+The effect-to-index mapping is defined in `_action_lut`.
 
 =========
 Observation space
@@ -56,10 +57,9 @@ Perciatelli-style reward (inspired by Google BLE):
 Termination occurs when:
 + Balloon altitude ≤ 0 m (crash).
 + Balloon altitude ≥ altitude ceiling (pop).
-+ Balloon fully deflated (helium loss).
-+ Ballast exhausted (no ballast remaining).
++ Balloon fully deflated / ballast exhausted (ZP only — SP envelope is sealed and reversible).
 + Balloon exits XY bounds (2D/3D only).
-+ Time limit reached (default 5000 steps).
++ Time limit reached (default 86400 steps).
 
 =========
 Visualisation
@@ -85,7 +85,7 @@ from typing import Literal, Dict, Any, Tuple
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import pygame
 
-from environments.core.balloon import Balloon
+from environments.core.balloon import Balloon, BalloonSP
 from environments.core.atmosphere import Atmosphere
 from environments.core.wind_field import WindField
 from environments.core.reward import balloon_reward, l2_distance
@@ -96,6 +96,7 @@ from environments.core.constants import (
     BALLAST_DROP, BALLAST_INITIAL,
     MIN_START_DISTANCE,
     INIT_VEL_SIGMA, INIT_GAS_FRAC_RANGE, INIT_BALLAST_LOSS_MAX,
+    AIR_PUMP_RATE, AIR_BLADDER_MAX, AIR_BLADDER_INITIAL,
 )
 
 _JIT_WARMED = False  # whether numba JIT has been warmed up
@@ -104,13 +105,21 @@ _JIT_WARMED = False  # whether numba JIT has been warmed up
 class Actions(Enum):
     """Effect values for balloon altitude control (not action indices).
 
-    drop_ballast (+1): drop expendable ballast to reduce weight → ascend.
-    nothing      ( 0): take no action.
-    vent         (-1): vent helium to reduce buoyancy → descend.
+    The effect values are model-agnostic; the underlying operation depends
+    on ``balloon_type``:
+
+    Effect | ZP (zero_pressure)            | SP (superpressure)
+    -------|-------------------------------|-------------------------------
+      +1   | drop_ballast  → ascend        | pump_out (air) → ascend
+       0   | nothing                       | nothing
+      -1   | vent_gas (helium) → descend   | pump_in  (air) → descend
+
+    ZP actions are irreversible (finite resource budget).
+    SP actions are reversible (air pumped in can be pumped out again).
     """
-    drop_ballast = 1
+    drop_ballast = 1   # ZP: drop sand ballast;  SP: pump air out
     nothing = 0
-    vent = -1
+    vent = -1          # ZP: vent helium;         SP: pump air in
 
 
 class Balloon3DEnv(gym.Env):
@@ -131,6 +140,7 @@ class Balloon3DEnv(gym.Env):
         window_size=(800, 600),  # pygame window (w,h)
         wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
         wind_layers=2,                # number of full wind rotations over altitude range (altitude_shear_2d only)
+        balloon_type="zero_pressure",  # "zero_pressure" (ZP + sand ballast) or "superpressure" (SP + air ballast)
     )
 
     def __init__(self,
@@ -142,6 +152,7 @@ class Balloon3DEnv(gym.Env):
         cfg = {**self.DEFAULTS, **(config or {}), "dim": dim}
         self.cfg = cfg
         self.dim: int = cfg["dim"]
+        self._balloon_type: str = cfg.get("balloon_type", "zero_pressure")
         self.wind_cfg_path = "environments/winds.json"
 
         assert self.dim in (1, 2, 3), f"dim must be 1, 2 or 3. Got {self.dim}."
@@ -307,11 +318,20 @@ class Balloon3DEnv(gym.Env):
             self._obs_buf[i + j] = self.last_wind[j] * inv_wind_mag
         i += d
 
-        # resource levels (normalised to [0, 1], clamped)
-        self._obs_buf[i] = min(self._balloon.ballast_mass / BALLAST_INITIAL, 1.0)
-        i += 1
-        self._obs_buf[i] = min(self._balloon.n_gas / self._init_n_gas, 1.0)
-        i += 1
+        # resource levels (normalised to [0, 1])
+        if self._balloon_type == "superpressure":
+            # SP: bladder fill fraction; complement gives headroom in both directions
+            bladder_frac = self._balloon.air_bladder_mass / AIR_BLADDER_MAX
+            self._obs_buf[i] = bladder_frac
+            i += 1
+            self._obs_buf[i] = 1.0 - bladder_frac
+            i += 1
+        else:
+            # ZP: remaining ballast and gas fractions (both irreversible)
+            self._obs_buf[i] = min(self._balloon.ballast_mass / BALLAST_INITIAL, 1.0)
+            i += 1
+            self._obs_buf[i] = min(self._balloon.n_gas / self._init_n_gas, 1.0)
+            i += 1
 
         return self._obs_buf.copy()
 
@@ -391,31 +411,53 @@ class Balloon3DEnv(gym.Env):
         real_dim = 3 if self.dim == 2 else self.dim
         # For 2D mode, balloon is internally 3D with fixed altitude z0
         init_pos = np.append(pos0, self.z0) if self.dim == 2 else pos0
-        self._balloon = Balloon(dim=real_dim,
-                                atmosphere=self._atmosphere,
-                                position=init_pos,
-                                velocity=[0.0] * real_dim,
-                                )
 
-        # Store neutral-buoyancy gas amount for normalising the gas observation
-        self._init_n_gas = self._balloon.n_gas
+        if self._balloon_type == "superpressure":
+            self._balloon = BalloonSP(dim=real_dim,
+                                      atmosphere=self._atmosphere,
+                                      position=init_pos,
+                                      velocity=[0.0] * real_dim,
+                                      )
+            self._init_n_gas = 1.0  # unused for SP; set to avoid AttributeError
 
-        # --- Domain randomisation of initial conditions ---
-        # Simulates variability after reaching float altitude: turbulence,
-        # imprecise inflation, and ballast spent during ascent.
-        # 1. Initial velocity perturbation (turbulence at float arrival)
-        init_vel = self.np_random.normal(0.0, INIT_VEL_SIGMA, size=real_dim)
-        if self.dim == 2:
-            init_vel[2] = 0.0  # no vertical velocity in 2D mode
-        self._balloon.vel[:] = init_vel
+            # --- SP domain randomisation ---
+            # 1. Initial velocity perturbation (turbulence at float arrival)
+            init_vel = self.np_random.normal(0.0, INIT_VEL_SIGMA, size=real_dim)
+            if self.dim == 2:
+                init_vel[2] = 0.0
+            self._balloon.vel[:] = init_vel
 
-        # 2. Gas imbalance (±INIT_GAS_FRAC_RANGE of neutral amount)
-        gas_frac = self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE)
-        self._balloon.n_gas *= (1.0 + gas_frac)
+            # 2. Bladder perturbation (±INIT_GAS_FRAC_RANGE × AIR_BLADDER_MAX around midpoint)
+            bladder_delta = self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE) * AIR_BLADDER_MAX
+            self._balloon.air_bladder_mass = float(
+                np.clip(self._balloon.air_bladder_mass + bladder_delta, 0.0, AIR_BLADDER_MAX)
+            )
+        else:
+            self._balloon = Balloon(dim=real_dim,
+                                    atmosphere=self._atmosphere,
+                                    position=init_pos,
+                                    velocity=[0.0] * real_dim,
+                                    )
 
-        # 3. Ballast variation (some ballast may have been spent during ascent)
-        ballast_loss = self.np_random.uniform(0.0, INIT_BALLAST_LOSS_MAX)
-        self._balloon.ballast_mass = max(0.0, self._balloon.ballast_mass - ballast_loss)
+            # Store neutral-buoyancy gas amount for normalising the gas observation
+            self._init_n_gas = self._balloon.n_gas
+
+            # --- ZP domain randomisation ---
+            # Simulates variability after reaching float altitude: turbulence,
+            # imprecise inflation, and ballast spent during ascent.
+            # 1. Initial velocity perturbation (turbulence at float arrival)
+            init_vel = self.np_random.normal(0.0, INIT_VEL_SIGMA, size=real_dim)
+            if self.dim == 2:
+                init_vel[2] = 0.0  # no vertical velocity in 2D mode
+            self._balloon.vel[:] = init_vel
+
+            # 2. Gas imbalance (±INIT_GAS_FRAC_RANGE of neutral amount)
+            gas_frac = self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE)
+            self._balloon.n_gas *= (1.0 + gas_frac)
+
+            # 3. Ballast variation (some ballast may have been spent during ascent)
+            ballast_loss = self.np_random.uniform(0.0, INIT_BALLAST_LOSS_MAX)
+            self._balloon.ballast_mass = max(0.0, self._balloon.ballast_mass - ballast_loss)
 
         observation = self._get_obs()
         info = self._get_info()
@@ -475,10 +517,16 @@ class Balloon3DEnv(gym.Env):
         # Map action index to balloon control
         effect = int(self._action_lut[action])
 
-        if effect == 1:       # drop ballast → ascend
-            self._balloon.drop_ballast(BALLAST_DROP)
-        elif effect == -1:    # vent gas → descend
-            self._balloon.vent_gas()
+        if self._balloon_type == "superpressure":
+            if effect == 1:    # pump air out → lighter → ascend
+                self._balloon.pump_out()
+            elif effect == -1: # pump air in → heavier → descend
+                self._balloon.pump_in()
+        else:
+            if effect == 1:    # drop ballast → ascend
+                self._balloon.drop_ballast(BALLAST_DROP)
+            elif effect == -1: # vent gas → descend
+                self._balloon.vent_gas()
 
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
         self.last_wind[:] = wind    # Cache for obs (copies before buffer reuse)
@@ -598,7 +646,7 @@ class Balloon3DEnv(gym.Env):
             self.renderer.clock = None
 
     def _ensure_renderer(self):
-        """Create renderer instance on first use"""
+        """Create renderer instance on first use."""
         if self.renderer is None:
             self.renderer = PygameRenderer(
                 window_size=(self.window_w, self.window_h),
@@ -610,3 +658,21 @@ class Balloon3DEnv(gym.Env):
                 wind_cells=self.wind_cells,
                 dim=self.dim,
             )
+
+
+class BalloonSP3DEnv(Balloon3DEnv):
+    """Entry point for superpressure balloon environments.
+
+    Identical to Balloon3DEnv with ``balloon_type='superpressure'`` locked in
+    so that passing additional config kwargs to ``gym.make()`` (e.g.
+    ``config={"time_max": 3600}``) does not accidentally revert to the default
+    zero-pressure model.  Any config items supplied at make-time are merged on
+    top of the SP default.
+    """
+
+    def __init__(self, dim: int = 3, render_mode=None, *, config=None):
+        super().__init__(
+            dim=dim,
+            render_mode=render_mode,
+            config={"balloon_type": "superpressure", **(config or {})},
+        )
