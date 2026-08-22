@@ -7,10 +7,9 @@ import numpy as np
 import pytest
 
 from environments.core.balloon import BalloonSP
-from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    G, ALT_DEFAULT,
-    SP_VOL_FIXED, SP_PAYLOAD_MASS,
+    G, R, M_HE, ALT_DEFAULT, ALT_SAFE_MIN, ALT_SAFE_MAX,
+    SP_VOL_FIXED,
     AIR_PUMP_RATE, AIR_BLADDER_MAX, AIR_BLADDER_INITIAL,
 )
 
@@ -50,6 +49,46 @@ class TestBalloonSPInitialization:
         """Fixed helium mass must be positive for the balloon to float."""
         b = BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
         assert b.m_he_fixed > 0.0
+
+
+class TestBalloonSPThermalState:
+    """SP state under the superheat gas-temperature model.
+
+    The neutral-buoyancy solve for ``m_he_fixed`` is a pure force balance and
+    so is temperature-independent — but the *state* of that helium (moles, and
+    hence envelope superpressure) is not, and both moved when the fixed
+    ``T_BALLOON`` was replaced.
+    """
+
+    def test_float_altitude_inside_safety_band(self, atmosphere):
+        """SP floats at ALT_DEFAULT by construction, which must be in band."""
+        b = BalloonSP(dim=1, atmosphere=atmosphere)
+        assert ALT_SAFE_MIN < b.altitude < ALT_SAFE_MAX
+        assert b.altitude == pytest.approx(ALT_DEFAULT)
+
+    def test_moles_consistent_with_fixed_mass(self, atmosphere):
+        b = BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
+        assert b.n_he_fixed == pytest.approx(b.m_he_fixed / M_HE)
+
+    def test_superpressure_uses_gas_temperature(self, atmosphere):
+        """superpressure() = nRT_gas/V - P_ambient at the current altitude."""
+        b = BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
+        t_gas = atmosphere.gas_temperature(ALT_DEFAULT)
+        expected = (b.n_he_fixed * R * t_gas / SP_VOL_FIXED
+                    - atmosphere.pressure(ALT_DEFAULT))
+        assert b.superpressure() == pytest.approx(expected, rel=1e-9)
+
+    def test_superpressure_is_positive_across_the_band(self, atmosphere):
+        """The envelope must stay superpressed (taut) everywhere it can fly."""
+        b = BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
+        for alt in np.linspace(ALT_SAFE_MIN, ALT_SAFE_MAX, 11):
+            b.pos[0] = alt
+            assert b.superpressure() > 0.0
+
+    def test_stationary_volume_is_the_fixed_volume(self, atmosphere):
+        """Sealed envelope never breathes, so extra_volume is identically zero."""
+        b = BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
+        assert b.stationary_volume == pytest.approx(SP_VOL_FIXED)
 
 
 class TestBalloonSPVolume:

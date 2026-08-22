@@ -64,3 +64,6 @@ venv.bak/
 
 # Ruff
 .ruff_cache/
+
+# Flight datasets (Zenodo 5119968) - large, fetched on demand
+EDA/Data/

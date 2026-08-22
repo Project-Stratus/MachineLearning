@@ -6,7 +6,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from agents.utils import _gather_monitor_csvs, InfoProgressBar
+from agents.baselines import ACTION_DOWN, ACTION_STAY, ACTION_UP, OBS_WIDTH
+from agents.utils import (
+    _gather_monitor_csvs,
+    ALT_SAFE_MAX,
+    ALT_SAFE_MIN,
+    IDX_ALT_NORM,
+    InfoProgressBar,
+    MomentumExplorer,
+)
 
 
 class TestGatherMonitorCSVs:
@@ -165,6 +173,203 @@ class TestInfoProgressBar:
         # the method exists and is callable
         assert hasattr(bar, "_on_step")
         assert callable(bar._on_step)
+
+
+# --------------------------------------------------------------------------- #
+# Momentum exploration (roadmap §3.8)
+# --------------------------------------------------------------------------- #
+BAND = ALT_SAFE_MAX - ALT_SAFE_MIN
+
+
+def _obs(altitudes) -> np.ndarray:
+    """Minimal batched observation carrying only ``alt_norm``."""
+    alts = np.atleast_1d(np.asarray(altitudes, dtype=np.float64))
+    obs = np.zeros((alts.size, OBS_WIDTH), dtype=np.float32)
+    obs[:, IDX_ALT_NORM] = (alts - ALT_SAFE_MIN) / BAND
+    return obs
+
+
+def _roll_toy_balloon(action_fn, n_steps: int = 600, rate: float = 50.0,
+                      alt0: float = 20_000.0):
+    """Drive a deliberately sluggish toy balloon and record what happened.
+
+    ``rate`` metres per decision is the whole point of the exercise: one
+    exploratory action barely moves the balloon, so only a *sustained* run of
+    the same action changes its altitude appreciably. Returns
+    ``(actions, altitudes)``.
+    """
+    alt = float(alt0)
+    actions, altitudes = [], []
+    for _ in range(n_steps):
+        action = int(action_fn(_obs(alt)))
+        alt = float(np.clip(alt + (action - ACTION_STAY) * rate, ALT_SAFE_MIN, ALT_SAFE_MAX))
+        actions.append(action)
+        altitudes.append(alt)
+    return np.asarray(actions), np.asarray(altitudes)
+
+
+def _persistence(actions: np.ndarray) -> float:
+    """Fraction of consecutive action pairs that are equal. Uniform random -> 1/3."""
+    return float(np.mean(actions[1:] == actions[:-1]))
+
+
+class TestMomentumExplorerState:
+    """Per-env state, bounds and the target random walk."""
+
+    def test_targets_start_inside_the_band(self):
+        ex = MomentumExplorer(seed=0)
+        ex.act(_obs([20_000.0] * 16))
+        assert ex.n_envs == 16
+        assert np.all(ex.target_alt >= ALT_SAFE_MIN)
+        assert np.all(ex.target_alt <= ALT_SAFE_MAX)
+
+    def test_targets_stay_inside_the_band_under_perturbation(self):
+        # Tiny band + huge sigma: every perturbation would escape if unclipped.
+        ex = MomentumExplorer(alt_min=19_000.0, alt_max=21_000.0, perturb_every=1,
+                              perturb_sigma=50_000.0, seed=1)
+        for _ in range(200):
+            ex.act(_obs([20_000.0, 20_000.0]))
+            assert np.all(ex.target_alt >= 19_000.0)
+            assert np.all(ex.target_alt <= 21_000.0)
+
+    def test_target_is_held_then_perturbed(self):
+        ex = MomentumExplorer(perturb_every=10, perturb_sigma=500.0, seed=2)
+        ex.act(_obs([20_000.0]))
+        ex.reset_envs()                      # resets the countdown to perturb_every
+        held = ex.target_alt.copy()
+        for _ in range(9):                   # 9 ticks: not yet due
+            ex.act(_obs([20_000.0]))
+            assert ex.target_alt == pytest.approx(held)
+        ex.act(_obs([20_000.0]))             # 10th tick: perturbation lands
+        assert ex.target_alt != pytest.approx(held)
+
+    def test_per_env_targets_are_independent(self):
+        ex = MomentumExplorer(seed=3)
+        ex.act(_obs([20_000.0] * 8))
+        assert len(np.unique(ex.target_alt)) == 8, "all 8 actors drew the same target"
+
+    def test_reset_envs_only_touches_the_masked_envs(self):
+        ex = MomentumExplorer(seed=4)
+        ex.act(_obs([20_000.0] * 4))
+        before = ex.target_alt.copy()
+        ex.reset_envs(np.array([True, False, False, True]))
+        assert ex.target_alt[0] != before[0]
+        assert ex.target_alt[3] != before[3]
+        np.testing.assert_array_equal(ex.target_alt[1:3], before[1:3])
+
+    def test_resizes_when_n_envs_changes(self):
+        ex = MomentumExplorer(seed=5)
+        ex.act(_obs([20_000.0]))
+        assert ex.n_envs == 1
+        ex.act(_obs([20_000.0] * 5))
+        assert ex.n_envs == 5 and ex.target_alt.shape == (5,)
+
+    def test_seeded_explorers_are_reproducible(self):
+        a = MomentumExplorer(seed=7).act(_obs([20_000.0] * 4))
+        b = MomentumExplorer(seed=7).act(_obs([20_000.0] * 4))
+        np.testing.assert_array_equal(a, b)
+
+    @pytest.mark.parametrize("bad", [
+        dict(alt_min=20_000.0, alt_max=19_000.0),
+        dict(perturb_every=0),
+        dict(perturb_sigma=-1.0),
+        dict(deadband=-1.0),
+    ])
+    def test_rejects_nonsense_config(self, bad):
+        with pytest.raises(ValueError):
+            MomentumExplorer(**bad)
+
+
+class TestMomentumExplorerActions:
+    """The action actually emitted, given a target and a current altitude."""
+
+    def test_commands_up_when_below_target_and_down_when_above(self):
+        ex = MomentumExplorer(deadband=100.0, seed=8)
+        ex.act(_obs([20_000.0, 20_000.0]))
+        ex.target_alt[:] = [22_000.0, 18_000.0]
+        actions = ex.act(_obs([20_000.0, 20_000.0]))
+        assert actions[0] == ACTION_UP
+        assert actions[1] == ACTION_DOWN
+
+    def test_stays_inside_the_deadband(self):
+        ex = MomentumExplorer(deadband=200.0, seed=9)
+        ex.act(_obs([20_000.0]))
+        ex.target_alt[:] = 20_000.0
+        assert int(ex.act(_obs([20_050.0]))[0]) == ACTION_STAY
+
+    def test_per_env_actions_differ_when_states_differ(self):
+        ex = MomentumExplorer(perturb_every=10_000, deadband=100.0, seed=10)
+        ex.act(_obs([20_000.0, 20_000.0, 20_000.0]))
+        ex.target_alt[:] = 20_000.0
+        actions = ex.act(_obs([16_000.0, 20_000.0, 24_000.0]))
+        np.testing.assert_array_equal(actions, [ACTION_UP, ACTION_STAY, ACTION_DOWN])
+
+    def test_accepts_a_single_unbatched_observation(self):
+        ex = MomentumExplorer(seed=11)
+        actions = ex.act(np.zeros(OBS_WIDTH, dtype=np.float32))
+        assert actions.shape == (1,)
+
+
+class TestMomentumExplorationIsCorrelated:
+    """The reason momentum exploration exists (roadmap §3.8).
+
+    Uniform ε-greedy is a zero-mean dither: consecutive actions are independent,
+    so the balloon never travels far enough to see a different wind. These tests
+    assert momentum exploration is *measurably* more persistent, and that the
+    persistence translates into macroscopic altitude variation.
+    """
+
+    N_STEPS = 600
+
+    def _uniform_stream(self, seed: int = 0):
+        rng = np.random.default_rng(seed)
+        return _roll_toy_balloon(lambda obs: rng.integers(3), n_steps=self.N_STEPS)
+
+    def _momentum_stream(self, seed: int = 0):
+        ex = MomentumExplorer(seed=seed)
+        return _roll_toy_balloon(lambda obs: ex.act(obs)[0], n_steps=self.N_STEPS)
+
+    def test_actions_are_far_more_persistent_than_uniform_random(self):
+        momentum_actions, _ = self._momentum_stream()
+        uniform_actions, _ = self._uniform_stream()
+
+        momentum_p = _persistence(momentum_actions)
+        uniform_p = _persistence(uniform_actions)
+
+        assert uniform_p == pytest.approx(1 / 3, abs=0.08), "uniform baseline drifted"
+        assert momentum_p > 0.9, f"momentum exploration is not persistent ({momentum_p:.3f})"
+        assert momentum_p > 2.0 * uniform_p
+
+    def test_persistence_produces_macroscopic_altitude_variation(self):
+        """Correlated actions must translate into the balloon actually moving.
+
+        Averaged over seeds rather than asserted per seed: an unforced random
+        walk occasionally wanders a long way, and the toy dynamics here are
+        kinder to it than the real env is (no buoyant restoring force, no
+        finite ballast, no altitude clamp doing most of the work). The claim
+        being tested is about the *distribution*, so measure it that way.
+        """
+        momentum_span, uniform_span = [], []
+        for seed in range(8):
+            _, momentum_alts = self._momentum_stream(seed=seed)
+            _, uniform_alts = self._uniform_stream(seed=seed)
+            momentum_span.append(np.ptp(momentum_alts))
+            uniform_span.append(np.ptp(uniform_alts))
+
+        assert np.mean(momentum_span) > 2.0 * np.mean(uniform_span)
+        assert np.mean(momentum_span) > 2_500.0, "momentum exploration barely moved the balloon"
+
+    def test_holds_a_direction_for_many_consecutive_decisions(self):
+        actions, _ = self._momentum_stream()
+        # Longest run of one action, ignoring which.
+        boundaries = np.flatnonzero(np.diff(actions)) + 1
+        runs = np.diff(np.concatenate(([0], boundaries, [actions.size])))
+        assert runs.max() > 50, f"longest action run was only {runs.max()} decisions"
+
+    @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
+    def test_persistence_holds_across_seeds(self, seed):
+        actions, _ = self._momentum_stream(seed=seed)
+        assert _persistence(actions) > 0.85
 
 
 class TestInfoProgressBarIntegration:

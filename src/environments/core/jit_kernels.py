@@ -18,6 +18,10 @@ _MU_REF = 1.716e-5
 _T_REF = 273.15
 _S_SUTH = 110.4
 
+# Thermal model — daytime superheat above ambient (kept in sync with
+# constants.SUPERHEAT_DAY).
+_SUPERHEAT_DAY = 15.0
+
 # Geometry
 _PI = math.pi
 _FOUR_THIRDS_PI = 4.0 / 3.0 * _PI
@@ -40,6 +44,12 @@ def pressure_numba(p0: float, alt: float) -> float:
     p_tropo = p0 * (_T_TROPO / _T0) ** _GM_RL
     scale_h = _R * _T_TROPO / (_M_AIR * _G)
     return p_tropo * math.exp(-(alt - _TROPO_ALT) / scale_h)
+
+
+@njit(cache=True, fastmath=True)
+def gas_temperature_numba(alt: float) -> float:
+    """Balloon gas temperature (K): ISA ambient plus the daytime superheat."""
+    return temperature_numba(alt) + _SUPERHEAT_DAY
 
 
 @njit(cache=True, fastmath=True)
@@ -85,18 +95,82 @@ def wind_sample_idx_numba(x: float, y: float, z: float,
                           x0: float, inv_dx: float,
                           y0: float, inv_dy: float,
                           z0: float, inv_dz: float,
-                          cells: int,
+                          cells_xy: int, cells_z: int,
                           fx_grid: np.ndarray, fy_grid: np.ndarray) -> (float, float):
+    """Nearest-cell lookup on the wind grid.
+
+    The vertical axis carries its own cell count: the grid is deliberately
+    anisotropic so the observation's wind column can resolve adjacent 250 m
+    levels without paying for the same resolution horizontally.
+    """
     ix = int((x - x0) * inv_dx)
     iy = int((y - y0) * inv_dy)
     iz = int((z - z0) * inv_dz)
     if ix < 0: ix = 0
-    elif ix >= cells: ix = cells - 1
+    elif ix >= cells_xy: ix = cells_xy - 1
     if iy < 0: iy = 0
-    elif iy >= cells: iy = cells - 1
+    elif iy >= cells_xy: iy = cells_xy - 1
     if iz < 0: iz = 0
-    elif iz >= cells: iz = cells - 1
+    elif iz >= cells_z: iz = cells_z - 1
     return fx_grid[ix, iy, iz], fy_grid[ix, iy, iz]
+
+
+@njit(cache=True, fastmath=True)
+def wind_sample_column_numba(x: float, y: float, z_center: float, spacing: float,
+                             x_lo: float, x_hi: float, inv_dx: float,
+                             y_lo: float, y_hi: float, inv_dy: float,
+                             z_lo: float, z_hi: float, inv_dz: float,
+                             cells_xy: int, cells_z: int,
+                             fx_grid: np.ndarray, fy_grid: np.ndarray,
+                             out: np.ndarray) -> None:
+    """Fill *out* (levels, 2) with (fx, fy) on a vertical column.
+
+    Level ``i`` sits at ``z_center + (i - levels//2) * spacing``.  Sampling
+    coordinates are clamped into the grid range, so levels outside the field
+    repeat the nearest edge cell rather than failing.
+
+    ``cells_xy`` bounds the x/y axes and ``cells_z`` the vertical one; they
+    differ because the vertical grid is refined to at least Nyquist for
+    ``spacing`` (see :class:`~environments.core.wind_field.WindField`).
+    """
+    levels = out.shape[0]
+    half = levels // 2
+
+    xi = x
+    if xi < x_lo:
+        xi = x_lo
+    elif xi > x_hi:
+        xi = x_hi
+    yi = y
+    if yi < y_lo:
+        yi = y_lo
+    elif yi > y_hi:
+        yi = y_hi
+
+    ix = int((xi - x_lo) * inv_dx)
+    if ix < 0:
+        ix = 0
+    elif ix >= cells_xy:
+        ix = cells_xy - 1
+    iy = int((yi - y_lo) * inv_dy)
+    if iy < 0:
+        iy = 0
+    elif iy >= cells_xy:
+        iy = cells_xy - 1
+
+    for i in range(levels):
+        zi = z_center + (i - half) * spacing
+        if zi < z_lo:
+            zi = z_lo
+        elif zi > z_hi:
+            zi = z_hi
+        iz = int((zi - z_lo) * inv_dz)
+        if iz < 0:
+            iz = 0
+        elif iz >= cells_z:
+            iz = cells_z - 1
+        out[i, 0] = fx_grid[ix, iy, iz]
+        out[i, 1] = fy_grid[ix, iy, iz]
 
 
 @njit(cache=True, fastmath=True)

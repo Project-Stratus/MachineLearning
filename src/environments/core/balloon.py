@@ -3,7 +3,7 @@ import numpy as np
 
 from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    G, R, VOL_MAX, VOL_MIN, VEL_MAX, M_HE, T_BALLOON,
+    G, R, VOL_MAX, VOL_MIN, VEL_MAX, M_HE,
     PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE_MOLES,
     ALT_DEFAULT, OSCILLATION_AMP, OSCILLATION_PERIOD, SPEED_EPS,
     MU_REF, T_REF, S_SUTH,
@@ -40,9 +40,11 @@ class Balloon:
     Gas tracking
     ------------
     Internal state tracks moles of helium (`self.n_gas`).  Volume is derived
-    each step via the ideal gas law: V = n * R * T_balloon / P_ambient.
-    As the balloon ascends, ambient pressure drops and volume grows
-    automatically (passive expansion).  The agent vents gas to descend.
+    each step via the ideal gas law: V = n * R * T_gas(z) / P_ambient(z),
+    where ``T_gas(z) = T_ambient(z) + SUPERHEAT_DAY`` comes from the
+    atmosphere model.  As the balloon ascends, ambient pressure drops and
+    volume grows automatically (passive expansion).  The agent vents gas to
+    descend.
 
     Drag model
     ----------
@@ -88,14 +90,15 @@ class Balloon:
         # Solve for true neutral buoyancy including helium mass.
         # Simultaneous equations:
         #   rho_air * V = structural_mass + n_gas * M_HE   (force balance)
-        #   V = n_gas * R * T_BALLOON / P_amb              (ideal gas law)
-        # Solving: n_gas = structural_mass / (rho_air * R * T_BALLOON / P_amb - M_HE)
+        #   V = n_gas * R * T_gas(z) / P_amb               (ideal gas law)
+        # Solving: n_gas = structural_mass / (rho_air * R * T_gas / P_amb - M_HE)
         alt = self.pos[-1]
         p_amb = self.atmosphere.pressure(alt)
         rho_air = self.atmosphere.density(alt)
+        t_gas = self.atmosphere.gas_temperature(alt)
         structural_mass = self.payload_mass + self.ballast_mass
-        self.n_gas = structural_mass / (rho_air * R * T_BALLOON / p_amb - M_HE)
-        self.stationary_volume = self.n_gas * R * T_BALLOON / p_amb
+        self.n_gas = structural_mass / (rho_air * R * t_gas / p_amb - M_HE)
+        self.stationary_volume = self.n_gas * R * t_gas / p_amb
         self.oscillate = oscillate
 
     # -- Variable mass --------------------------------------------------------
@@ -106,9 +109,15 @@ class Balloon:
 
     # -- Volume from gas law --------------------------------------------------
     def _gas_law_volume(self) -> float:
-        """Ideal gas law volume: V = n·R·T_balloon / P_ambient, clamped."""
-        p_amb = self.atmosphere.pressure(self.pos[-1])
-        vol = self.n_gas * R * T_BALLOON / p_amb
+        """Ideal gas law volume: V = n·R·T_gas(z) / P_ambient(z), clamped.
+
+        Goes through ``self.atmosphere`` rather than ``gas_law_volume_numba``
+        so a Layer-2 atmosphere that overrides ``gas_temperature`` is honoured
+        here; both underlying calls are themselves JIT-accelerated.
+        """
+        alt = self.pos[-1]
+        p_amb = self.atmosphere.pressure(alt)
+        vol = self.n_gas * R * self.atmosphere.gas_temperature(alt) / p_amb
         return max(VOL_MIN, min(vol, VOL_MAX))
 
     # 1-D env (altitude) --------------------------------------------------
@@ -193,6 +202,38 @@ class Balloon:
             self.drop_ballast(BALLAST_DROP)
         elif delta < 0:
             self.vent_gas()
+
+    # -- Altitude safety primitive --------------------------------------------
+    def clamp_altitude(self, z_min: float, z_max: float) -> tuple[bool, bool]:
+        """Clamp altitude into ``[z_min, z_max]``, zeroing vertical velocity.
+
+        This is the *primitive* the environment's altitude safety layer is
+        built on: it does not decide the band, log anything, or terminate.  It
+        clamps the state and reports which limit was touched so the caller can
+        set the ``at_alt_min`` / ``at_alt_max`` observation flags.
+
+        A limit counts as hit when the balloon is beyond it, or sitting exactly
+        on it with velocity still pointing outward — so the flag stays raised
+        while the balloon is pressed against the limit rather than flickering
+        on alternate steps.
+
+        Returns
+        -------
+        (hit_min, hit_max) : tuple[bool, bool]
+        """
+        z = float(self.pos[-1])
+        vz = float(self.vel[-1])
+        hit_min = bool(z < z_min or (z == z_min and vz < 0.0))
+        hit_max = bool(z > z_max or (z == z_max and vz > 0.0))
+
+        if hit_min:
+            self.pos[-1] = z_min
+            self.vel[-1] = 0.0
+        elif hit_max:
+            self.pos[-1] = z_max
+            self.vel[-1] = 0.0
+
+        return hit_min, hit_max
 
     @property
     def is_deflated(self) -> bool:
@@ -415,14 +456,27 @@ class BalloonSP(Balloon):
 
         # Fixed outer volume
         self.volume_fixed = SP_VOL_FIXED
+        self.stationary_volume = SP_VOL_FIXED  # sealed envelope: never breathes
 
         # Air bladder starts at midpoint for equal up/down authority
         self.air_bladder_mass = AIR_BLADDER_INITIAL
 
         # Fixed helium mass: ensures neutral buoyancy at ALT_DEFAULT with bladder
         # at midpoint.  Derived from: ρ_air(ALT_DEFAULT) · V_FIXED = m_total.
+        # This balance is a pure force balance, so it is unaffected by the
+        # superheat model — but the *state* of that helium is not, so the mole
+        # count (and hence the envelope's superpressure) is derived with the
+        # gas temperature.  Layer 4 §6.6 needs it for envelope-state work.
         rho_air = self.atmosphere.density(ALT_DEFAULT)
         self.m_he_fixed = rho_air * SP_VOL_FIXED - payload_mass - AIR_BLADDER_INITIAL
+        self.n_he_fixed = self.m_he_fixed / M_HE
+
+    # -- Envelope state --------------------------------------------------------
+    def superpressure(self) -> float:
+        """Internal-minus-ambient pressure (Pa) of the sealed helium envelope."""
+        alt = self.pos[-1]
+        p_int = self.n_he_fixed * R * self.atmosphere.gas_temperature(alt) / self.volume_fixed
+        return p_int - self.atmosphere.pressure(alt)
 
     # -- Variable mass ---------------------------------------------------------
     @property

@@ -1,14 +1,15 @@
-"""Tests for the Balloon class - variable mass, ballast, gas venting, passive expansion, relative-velocity drag, Verlet integration."""
+"""Tests for the Balloon class - variable mass, ballast, gas venting, passive
+expansion, relative-velocity drag, Verlet integration and the altitude clamp
+primitive."""
 
-import math
 import numpy as np
 import pytest
 
 from environments.core.balloon import Balloon
-from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    G, R, T_BALLOON, M_HE, ALT_DEFAULT, VOL_MAX, VOL_MIN,
-    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE,
+    G, R, M_HE, ALT_DEFAULT, ALT_MAX, ALT_SAFE_MIN, ALT_SAFE_MAX,
+    VOL_MAX, VOL_MIN, SUPERHEAT_DAY,
+    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE_MOLES,
 )
 
 
@@ -58,11 +59,130 @@ class TestBalloonInitialization:
         assert buoyancy == pytest.approx(balloon.mass, rel=1e-4)
 
     def test_initial_gas_moles_consistent(self, atmosphere):
-        """Initial n_gas should satisfy V = nRT/P at the starting altitude."""
+        """Initial n_gas should satisfy V = n·R·T_gas(z)/P at the start altitude."""
         balloon = Balloon(dim=1, atmosphere=atmosphere, position=[10_000.0])
         p = atmosphere.pressure(10_000.0)
-        expected_vol = balloon.n_gas * R * T_BALLOON / p
+        t_gas = atmosphere.gas_temperature(10_000.0)
+        expected_vol = balloon.n_gas * R * t_gas / p
         assert balloon.volume == pytest.approx(expected_vol, rel=1e-4)
+
+
+class TestFloatAltitudeCalibration:
+    """The derived float altitude must sit inside the operational band.
+
+    ``ALT_DEFAULT`` moved when the fixed ``T_BALLOON`` was replaced by the
+    superheat model and ``VOL_MAX`` was re-sized; these tests pin the result so
+    a future constants change cannot silently push the spawn point out of the
+    band the safety layer clamps to.
+    """
+
+    def test_alt_default_inside_safety_band(self):
+        assert ALT_SAFE_MIN < ALT_DEFAULT < ALT_SAFE_MAX
+
+    def test_ceiling_above_safety_band(self):
+        """The agent must be able to reach the top of its own operating range."""
+        assert ALT_MAX > ALT_SAFE_MAX
+
+    def test_neutral_buoyancy_at_alt_default(self, atmosphere):
+        """A default balloon spawned at ALT_DEFAULT is genuinely neutrally buoyant."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere)
+        assert balloon.altitude == pytest.approx(ALT_DEFAULT)
+        rho_air = atmosphere.density(ALT_DEFAULT)
+        assert rho_air * balloon.volume == pytest.approx(balloon.mass, rel=1e-9)
+
+    def test_no_net_vertical_force_at_alt_default(self, atmosphere):
+        """Buoyancy and weight cancel, so an undisturbed balloon does not drift."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere)
+        buoy = balloon.buoyant_force(0.0)[-1]
+        assert buoy == pytest.approx(balloon.mass * G, rel=1e-9)
+
+    def test_stays_put_when_left_alone(self, atmosphere):
+        """Neutral buoyancy should hold over a few minutes of integration."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere)
+        for _ in range(300):
+            balloon.update(1.0)
+        assert abs(balloon.altitude - ALT_DEFAULT) < 10.0
+
+    def test_volume_not_clamped_across_the_band(self, atmosphere):
+        """VOL_MAX must not bind anywhere inside [ALT_SAFE_MIN, ALT_SAFE_MAX].
+
+        If it did, the gas law would silently stop applying partway up the
+        operating range and the physics would change character mid-band.
+        """
+        balloon = Balloon(dim=1, atmosphere=atmosphere)
+        for alt in np.linspace(ALT_SAFE_MIN, ALT_SAFE_MAX, 21):
+            balloon.pos[0] = alt
+            p = atmosphere.pressure(alt)
+            unclamped = balloon.n_gas * R * atmosphere.gas_temperature(alt) / p
+            assert VOL_MIN < unclamped < VOL_MAX
+            assert balloon.volume == pytest.approx(unclamped, rel=1e-9)
+
+
+class TestSuperheatModel:
+    """The gas is at ambient + SUPERHEAT_DAY, not a fixed absolute."""
+
+    def test_volume_uses_altitude_dependent_gas_temperature(self, atmosphere):
+        """Volume must follow T_gas(z), not a single constant temperature."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[5_000.0])
+        for alt in [2_000.0, 8_000.0, 14_000.0, 20_000.0]:
+            balloon.pos[0] = alt
+            expected = (balloon.n_gas * R * atmosphere.gas_temperature(alt)
+                        / atmosphere.pressure(alt))
+            expected = max(VOL_MIN, min(expected, VOL_MAX))
+            assert balloon.volume == pytest.approx(expected, rel=1e-9)
+
+    def test_gas_is_colder_than_the_old_fixed_constant(self, atmosphere):
+        """Stratospheric gas must be ~231 K, not the old 293.15 K (+76 K superheat)."""
+        t_gas = atmosphere.gas_temperature(20_000.0)
+        assert t_gas == pytest.approx(216.65 + SUPERHEAT_DAY, abs=0.01)
+        assert t_gas < 273.15 + 20.0
+
+    def test_vent_rate_moles_calibrated_at_float_altitude(self, atmosphere):
+        """VENT_RATE_MOLES must be derived with the float-altitude gas temperature."""
+        from environments.core.constants import VENT_RATE
+        p = atmosphere.pressure(ALT_DEFAULT)
+        t_gas = atmosphere.gas_temperature(ALT_DEFAULT)
+        assert VENT_RATE_MOLES == pytest.approx(p * VENT_RATE / (R * t_gas), rel=1e-9)
+
+
+class TestActuatorSymmetry:
+    """One vent must remove the buoyancy one ballast drop adds, at float altitude.
+
+    VENT_RATE is derived from this invariant rather than hardcoded, so moving
+    ALT_DEFAULT cannot silently weaken the descent actuator (a fixed volume is
+    worth less force in thinner air).
+    """
+
+    def test_vent_and_ballast_forces_match_at_float(self, atmosphere):
+        """Net force per vent == net force per drop, helium's own weight included."""
+        from environments.core.constants import VENT_RATE
+        rho = atmosphere.density(ALT_DEFAULT)
+        lost_buoyancy = rho * G * VENT_RATE
+        lost_weight = VENT_RATE_MOLES * M_HE * G
+        assert (lost_buoyancy - lost_weight) == pytest.approx(BALLAST_DROP * G, rel=1e-9)
+
+    def test_one_vent_and_one_drop_move_the_balloon_oppositely(self, atmosphere):
+        """Equal and opposite net force after a single action of each kind."""
+        rho = atmosphere.density(ALT_DEFAULT)
+
+        b_vent = Balloon(dim=1, atmosphere=atmosphere)
+        b_drop = Balloon(dim=1, atmosphere=atmosphere)
+        f0 = rho * G * b_vent.volume - b_vent.mass * G
+
+        b_vent.vent_gas()
+        b_drop.drop_ballast()
+        f_vent = rho * G * b_vent.volume - b_vent.mass * G
+        f_drop = rho * G * b_drop.volume - b_drop.mass * G
+
+        assert f_vent < f0 < f_drop
+        assert (f0 - f_vent) == pytest.approx(f_drop - f0, rel=1e-6)
+
+    def test_both_budgets_are_finite_and_comparable(self, atmosphere):
+        """Neither resource should be effectively unlimited over an episode."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere)
+        n_vents = balloon.n_gas / VENT_RATE_MOLES
+        n_drops = BALLAST_INITIAL / BALLAST_DROP
+        assert 0.25 < n_drops / n_vents < 4.0
 
 
 class TestGasExpansion:
@@ -91,12 +211,12 @@ class TestGasExpansion:
         assert b_low.volume < b_high.volume
 
     def test_ideal_gas_law_holds(self, atmosphere):
-        """Volume should satisfy V = nRT/P at any altitude."""
+        """Volume should satisfy V = n·R·T_gas(z)/P at any altitude."""
         balloon = Balloon(dim=1, atmosphere=atmosphere, position=[8_000.0])
         for alt in [2_000.0, 8_000.0, 14_000.0, 20_000.0]:
             balloon.pos[0] = alt
             p = atmosphere.pressure(alt)
-            expected = balloon.n_gas * R * T_BALLOON / p
+            expected = balloon.n_gas * R * atmosphere.gas_temperature(alt) / p
             expected = max(VOL_MIN, min(expected, VOL_MAX))
             assert balloon.volume == pytest.approx(expected, rel=1e-4)
 
@@ -425,6 +545,99 @@ class TestBalloonProperties:
         balloon_1d.vent_gas()
         ev_after = balloon_1d.extra_volume
         assert ev_after < ev_before
+
+
+class TestClampAltitude:
+    """Tests for the altitude clamp primitive the env safety layer builds on."""
+
+    def test_no_clamp_inside_band(self, atmosphere):
+        """Inside the band nothing moves and no limit is reported."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[20_000.0],
+                          velocity=[3.0])
+        hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
+        assert (hit_min, hit_max) == (False, False)
+        assert balloon.altitude == 20_000.0
+        assert balloon.velocity == 3.0
+
+    def test_clamp_below_min(self, atmosphere):
+        """Below the floor: snapped up, vertical velocity zeroed, hit_min set."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[14_000.0],
+                          velocity=[-5.0])
+        hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
+        assert hit_min is True
+        assert hit_max is False
+        assert balloon.altitude == ALT_SAFE_MIN
+        assert balloon.velocity == 0.0
+
+    def test_clamp_above_max(self, atmosphere):
+        """Above the ceiling: snapped down, vertical velocity zeroed, hit_max set."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[26_000.0],
+                          velocity=[5.0])
+        hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
+        assert hit_min is False
+        assert hit_max is True
+        assert balloon.altitude == ALT_SAFE_MAX
+        assert balloon.velocity == 0.0
+
+    def test_returns_plain_bools(self, atmosphere):
+        """Env writes these into a float32 obs — keep them real bools, not np.bool_."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[26_000.0])
+        hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
+        assert type(hit_min) is bool
+        assert type(hit_max) is bool
+
+    def test_horizontal_state_untouched(self, atmosphere):
+        """Only the vertical axis is affected."""
+        balloon = Balloon(dim=3, atmosphere=atmosphere,
+                          position=[100.0, -200.0, 30_000.0],
+                          velocity=[4.0, -6.0, 8.0])
+        balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
+        assert balloon.x == 100.0
+        assert balloon.y == -200.0
+        assert balloon.vx == 4.0
+        assert balloon.vy == -6.0
+        assert balloon.altitude == ALT_SAFE_MAX
+        assert balloon.velocity == 0.0
+
+    def test_flag_stays_raised_while_pressed_against_limit(self, atmosphere):
+        """Sitting exactly on a limit with outward velocity still counts as a hit.
+
+        Otherwise the flag flickers off on the step after a clamp even though
+        the balloon is still being held.
+        """
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX],
+                          velocity=[2.0])
+        assert balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (False, True)
+
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MIN],
+                          velocity=[-2.0])
+        assert balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (True, False)
+
+    def test_on_limit_moving_inward_is_not_a_hit(self, atmosphere):
+        """Leaving the limit under its own power should clear the flag."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX],
+                          velocity=[-2.0])
+        assert balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (False, False)
+        assert balloon.velocity == -2.0
+
+    def test_repeated_clamping_is_stable(self, atmosphere):
+        """A buoyant balloon held at the ceiling stays there across many steps."""
+        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX])
+        for _ in range(200):
+            balloon.drop_ballast()  # strongly buoyant, will push up every step
+        for _ in range(50):
+            balloon.update(1.0)
+            hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
+        assert hit_max is True
+        assert balloon.altitude == ALT_SAFE_MAX
+        assert balloon.velocity == 0.0
+
+    def test_clamp_works_for_sp_balloon(self, balloon_sp_1d):
+        """The primitive is inherited by BalloonSP unchanged."""
+        balloon_sp_1d.pos[-1] = 26_000.0
+        balloon_sp_1d.vel[-1] = 1.0
+        assert balloon_sp_1d.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (False, True)
+        assert balloon_sp_1d.altitude == ALT_SAFE_MAX
 
 
 class TestRelativeVelocityDrag:

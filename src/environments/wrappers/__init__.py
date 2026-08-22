@@ -1,6 +1,13 @@
-from environments.wrappers.clip_reward import ClipReward
+"""Gym wrappers for the balloon environments.
+
+Only one survives Layer 1: the decision-interval wrapper that decouples the
+agent's decision rate from the physics timestep.  The rest (``ClipReward``,
+``DiscreteActions``, ``ReacherRewardWrapper``, ``RelativePosition``,
+``MyPolicy``) were tutorial leftovers written against dict observations, a
+continuous action space and Reacher's ``info`` keys — none of which this
+project has ever had — and were deleted rather than carried.
+"""
+
 from environments.wrappers.decision_interval import DecisionIntervalWrapper
-from environments.wrappers.discrete_actions import DiscreteActions
-from environments.wrappers.reacher_weighted_reward import ReacherRewardWrapper
-from environments.wrappers.relative_position import RelativePosition
-from environments.wrappers.policy import MyPolicy
+
+__all__ = ["DecisionIntervalWrapper"]

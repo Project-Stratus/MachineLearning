@@ -3,11 +3,13 @@ import numpy as np
 from environments.core.constants import (
     P0, R, M_AIR, G,
     T0, LAPSE_RATE, TROPOPAUSE_ALT, T_TROPOPAUSE,
-    MU_REF, T_REF, S_SUTH,
+    MU_REF, T_REF, S_SUTH, SUPERHEAT_DAY,
 )
 
 try:
-    from environments.core.jit_kernels import pressure_numba, density_numba, temperature_numba
+    from environments.core.jit_kernels import (
+        pressure_numba, density_numba, temperature_numba, gas_temperature_numba,
+    )
     _JIT_OK = True
 except Exception:
     _JIT_OK = False
@@ -35,6 +37,23 @@ class Atmosphere:
         if altitude <= TROPOPAUSE_ALT:
             return T0 - LAPSE_RATE * altitude
         return T_TROPOPAUSE
+
+    def gas_temperature(self, altitude):
+        """Returns the balloon gas temperature (K) at a given altitude.
+
+        Layer 1 is daytime-only, so the gas simply runs a constant superheat
+        offset above ambient::
+
+            T_gas(z) = T_ambient(z) + SUPERHEAT_DAY
+
+        This replaces the old fixed absolute ``T_BALLOON`` (293.15 K), which
+        implied a +76 K superheat against a 216.65 K stratosphere.  Layer 2
+        swaps the constant offset for a radiative day/night model by
+        overriding this method — every physics call site goes through it.
+        """
+        if _JIT_OK:
+            return float(gas_temperature_numba(altitude))
+        return self.temperature(altitude) + SUPERHEAT_DAY
 
     def pressure(self, altitude):
         """

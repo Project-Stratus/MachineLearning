@@ -3,8 +3,23 @@
 import numpy as np
 import pytest
 
-from environments.core.constants import ALT_DEFAULT, ALT_MAX, SP_VOL_FIXED
+from agents.baselines import AMBIENT_IDX
+from environments.core.constants import (
+    ALT_DEFAULT, ALT_SAFE_MAX, ALT_SAFE_MIN, DIST_NORM, SP_VOL_FIXED,
+    VEL_MAX, VEL_Z_OBS_NORM, VOL_MAX,
+)
 from environments.envs.balloon_3d_env import Balloon3DEnv
+
+#: Read the observation through the *names* in the frozen layout (contract §1).
+#: These tests previously indexed it with magic numbers from a since-replaced
+#: 19-wide layout and kept passing on the wrong fields until they did not.
+IDX_ALT_NORM = AMBIENT_IDX["alt_norm"]
+IDX_VEL_Z_NORM = AMBIENT_IDX["vel_z_norm"]
+IDX_DIST_NORM = AMBIENT_IDX["dist_norm"]
+IDX_VOLUME_NORM = AMBIENT_IDX["volume_norm"]
+IDX_AT_ALT_MIN = AMBIENT_IDX["at_alt_min"]
+IDX_AT_ALT_MAX = AMBIENT_IDX["at_alt_max"]
+IDX_LAST_ACTION_DOWN = AMBIENT_IDX["last_action_down"]
 
 
 class TestFullEpisodeRollout:
@@ -36,7 +51,7 @@ class TestFullEpisodeRollout:
 
     @pytest.mark.integration
     def test_episode_reward_bounds(self):
-        """Episode rewards should be within reasonable bounds."""
+        """Rewards live in [0, 1] — the Perciatelli-style reward has no penalties."""
         env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 50})
         try:
             env.reset(seed=42)
@@ -48,9 +63,8 @@ class TestFullEpisodeRollout:
                 if term or trunc:
                     break
 
-            # Rewards should be bounded (distance reward in [-1, 0] plus small bonuses)
             for r in rewards:
-                assert -10 < r < 2, f"Reward {r} outside expected bounds"
+                assert 0.0 <= r <= 1.0, f"Reward {r} outside the [0, 1] contract"
         finally:
             env.close()
 
@@ -150,17 +164,28 @@ class TestPhysicsConsistency:
             env.close()
 
     @pytest.mark.integration
-    def test_altitude_stays_positive_or_terminates(self):
-        """Altitude should stay positive or episode should terminate."""
+    def test_altitude_stays_within_safety_band(self):
+        """The safety layer holds the balloon inside the operational band.
+
+        Formerly "altitude should stay positive", which the ground clamp made
+        trivially true.  The live invariant is the ``[ALT_SAFE_MIN,
+        ALT_SAFE_MAX]`` band, and venting is the fastest way to lean on its
+        floor (roadmap §3.4).
+        """
         env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 500})
         try:
             env.reset(seed=42)
 
             for _ in range(500):
-                _, _, terminated, truncated, _ = env.step(0)  # Keep deflating
+                obs, _, terminated, _, _ = env.step(0)  # keep venting
+                assert ALT_SAFE_MIN - 1e-6 <= env._balloon.altitude <= ALT_SAFE_MAX + 1e-6, \
+                    "altitude escaped the operational band"
+                assert obs[IDX_ALT_NORM] == pytest.approx(
+                    (env._balloon.altitude - ALT_SAFE_MIN) / (ALT_SAFE_MAX - ALT_SAFE_MIN),
+                    abs=1e-5,
+                )
                 if terminated:
                     break
-                assert env._balloon.altitude >= 0, "Altitude should never be negative"
         finally:
             env.close()
 
@@ -207,60 +232,74 @@ class TestRewardConsistency:
     """Tests for reward consistency during episodes."""
 
     @pytest.mark.integration
-    def test_reward_improves_when_approaching_goal(self):
-        """Reward should generally improve when getting closer to goal."""
-        env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 100})
+    def test_reward_is_monotone_in_distance(self):
+        """Being nearer the station is never worth less.
+
+        Holding one action for the whole rollout keeps the resource factor
+        constant, so reward becomes a pure function of distance and the
+        invariant can be checked without a tolerance on the trajectory: sort
+        the (distance, reward) pairs and reward must not increase with
+        distance.  The previous version computed early/late averages, then
+        asserted only ``r > -2`` — vacuous under a reward bounded below by 0.
+        """
+        env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 200})
         try:
             env.reset(seed=42)
+            action = 2 if env.goal[0] > env._balloon.altitude else 0
 
-            # Determine which direction to go
-            balloon_z = env._balloon.altitude
-            goal_z = env.goal[0]
-
-            # Choose action to move toward goal
-            if goal_z > balloon_z:
-                action = 2  # Drop ballast to rise
-            else:
-                action = 0  # Vent gas to fall
-
-            rewards = []
-            for _ in range(30):
-                _, reward, term, _, _ = env.step(action)
-                rewards.append(reward)
+            pairs = []
+            for _ in range(60):
+                _, reward, term, trunc, info = env.step(action)
                 if term:
+                    # Termination forfeits reward regardless of distance.
+                    break
+                pairs.append((info["distance"], reward))
+                if trunc:
                     break
 
-            # Later rewards should generally be better (less negative)
-            # Compare first 5 vs last 5 average
-            if len(rewards) >= 10:
-                early_avg = np.mean(rewards[:5])
-                late_avg = np.mean(rewards[-5:])
-                # This might not always hold due to direction reward, but distance should help
-                # Just verify rewards are reasonable
-                assert all(r > -2 for r in rewards), "Rewards should be reasonable"
+            assert len(pairs) >= 10, "need a usable rollout to check the invariant"
+            pairs.sort(key=lambda p: p[0])
+            rewards = [r for _, r in pairs]
+            assert all(0.0 <= r <= 1.0 for r in rewards)
+            for near, far in zip(rewards, rewards[1:]):
+                assert near >= far - 1e-9, "reward must not grow with distance"
         finally:
             env.close()
 
     @pytest.mark.integration
-    def test_crash_gives_punishment(self):
-        """Crashing should give punishment reward."""
-        env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 1000, "punishment": -5.0})
+    def test_hitting_alt_min_clamps_and_flags_without_terminating(self):
+        """The floor of the band clamps the balloon; it no longer kills it.
+
+        Replaces ``test_crash_gives_punishment``: crash termination was removed
+        with the altitude safety layer (contract §5, roadmap §3.4), so the
+        behaviour under test is the clamp, the ``at_alt_min`` flag, and the
+        *absence* of both termination and a punishment reward.
+        """
+        env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 1000})
         try:
             env.reset(seed=42)
+            # Drop the balloon onto the floor with enough speed that the clamp
+            # has to act, rather than waiting on buoyancy to take it there.
+            env._balloon.pos[-1] = ALT_SAFE_MIN + 20.0
+            env._balloon.vel[-1] = -0.5 * VEL_MAX
 
-            # Make balloon heavy so gravity overwhelms buoyancy, causing a crash
-            env._balloon.payload_mass = 1000.0
-            env._balloon.pos[0] = 10.0
-            env._balloon.vel[0] = -5.0
-
-            # Step until crash
+            clamped = False
             for _ in range(100):
-                _, reward, terminated, _, _ = env.step(1)  # do nothing
-                if terminated:
-                    assert reward == 0.0, "Crash should give zero reward (forfeits future reward)"
+                obs, reward, terminated, truncated, _ = env.step(1)  # do nothing
+                assert not terminated, "altitude must never terminate the episode"
+                assert env._balloon.altitude >= ALT_SAFE_MIN - 1e-9
+                assert reward > 0.0, "there is no punishment for touching the limit"
+                if obs[IDX_AT_ALT_MIN] == 1.0:
+                    clamped = True
+                    assert env._balloon.altitude == pytest.approx(ALT_SAFE_MIN)
+                    assert env._balloon.vel[-1] == pytest.approx(0.0)
+                    assert obs[IDX_AT_ALT_MAX] == 0.0
+                    assert obs[IDX_ALT_NORM] == pytest.approx(0.0)
                     break
-            else:
-                pytest.skip("Balloon didn't crash in time")
+                if truncated:
+                    break
+
+            assert clamped, "a hard descent should reach the lower altitude limit"
         finally:
             env.close()
 
@@ -270,22 +309,40 @@ class TestStateConsistency:
 
     @pytest.mark.integration
     def test_balloon_state_matches_observation(self):
-        """Balloon state should be reflected in observation."""
+        """Balloon state should be reflected in the observation.
+
+        Indexed by name from ``agents.baselines.AMBIENT_IDX`` rather than by
+        position: the original read ``obs[2]`` for a normalised altitude, an
+        index that under the frozen 143-wide layout is the wind column's
+        uncertainty channel.  A layout change should break the *import*, not
+        silently compare against an unrelated field.
+        """
         env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 100})
         try:
             obs, _ = env.reset(seed=42)
+            span = ALT_SAFE_MAX - ALT_SAFE_MIN
 
             for _ in range(10):
-                obs, _, _, _, _ = env.step(env.action_space.sample())
+                action = env.action_space.sample()
+                obs, _, _, _, info = env.step(action)
+                b = env._balloon
 
-                # Position in observation should match balloon position (normalized)
-                # Position is at index dim+1 for 1D (after goal and volume)
-                pos_norm_obs = obs[2]  # For dim=1: goal(1) + vol(1) + pos(1)
-                pos_actual = env._balloon.pos[0]
-                z_min, z_max = env.z_range
-                pos_norm_expected = (pos_actual - z_min) / (z_max - z_min)
+                assert obs[IDX_ALT_NORM] == pytest.approx(
+                    np.clip((b.altitude - ALT_SAFE_MIN) / span, 0.0, 1.0), abs=1e-5)
+                assert obs[IDX_VEL_Z_NORM] == pytest.approx(
+                    np.clip(b.vel[-1] / VEL_Z_OBS_NORM, -1.0, 1.0), abs=1e-5)
+                assert obs[IDX_VOLUME_NORM] == pytest.approx(
+                    min(b.volume / VOL_MAX, 1.0), rel=1e-5)
+                # Distance normaliser is per-dim (1-D measures |dz| against a
+                # much tighter altitude scale), so read it off the env rather
+                # than assuming the horizontal constant.
+                assert obs[IDX_DIST_NORM] == pytest.approx(
+                    min(info["distance"] * env._inv_dist_norm, 1.0), abs=1e-5)
 
-                assert pos_norm_obs == pytest.approx(pos_norm_expected, rel=0.01)
+                # Previous action is one-hot encoded in action-index order.
+                one_hot = obs[IDX_LAST_ACTION_DOWN:IDX_LAST_ACTION_DOWN + 3]
+                assert one_hot.sum() == pytest.approx(1.0)
+                assert one_hot[action] == 1.0
         finally:
             env.close()
 
@@ -524,17 +581,21 @@ class TestSPPhysicsConsistency:
             env.close()
 
     @pytest.mark.integration
-    def test_sp_altitude_stays_positive_or_terminates(self):
-        """SP altitude should stay positive or episode should terminate."""
+    def test_sp_altitude_stays_within_safety_band(self):
+        """SP obeys the same altitude safety layer as ZP, and never terminates on it."""
         env = Balloon3DEnv(dim=1, render_mode=None,
                            config={"time_max": 500, "balloon_type": "superpressure"})
         try:
             env.reset(seed=42)
             for _ in range(500):
-                _, _, terminated, truncated, _ = env.step(0)  # pump_in repeatedly
-                if terminated:
+                obs, _, terminated, truncated, _ = env.step(0)  # pump_in repeatedly
+                assert not terminated, "SP has no altitude termination"
+                assert ALT_SAFE_MIN - 1e-6 <= env._balloon.altitude <= ALT_SAFE_MAX + 1e-6, \
+                    "SP altitude escaped the operational band"
+                if obs[IDX_AT_ALT_MIN] == 1.0:
+                    assert env._balloon.altitude == pytest.approx(ALT_SAFE_MIN)
+                if truncated:
                     break
-                assert env._balloon.altitude >= 0.0, "SP altitude should never go negative"
         finally:
             env.close()
 

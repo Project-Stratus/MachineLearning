@@ -12,6 +12,22 @@ Station-keeping high-altitude balloons have several key advantages over drones, 
 - Short/medium-range weather forecasting from the stratosphere
 - They're cool :)
 
+## Project scope
+Stratus is an amateur-scale project. We are **not** rebuilding Loon — the constraints below define what we are actually targeting, and they drive the design decisions throughout the codebase.
+
+| Constraint | Value |
+| --- | --- |
+| Flight duration | 12 hours |
+| Flight window | Any 12-hour window, including full night |
+| Primary platform | Zero-pressure balloons; small superpressure later |
+| Scale | Small envelopes, amateur payloads |
+| Consumables | Ballast and helium budgets are **binding** — rationing them is part of the control problem |
+| Hardware | We intend to fly during this project, so the observation space must be constructible from real onboard sensors |
+
+Development is staged into five layers, each independently trainable and measurable before the next begins: deterministic basics → deterministic weather → uncertainty → hardware → deferred long-duration superpressure. See [`notes/development_roadmap.md`](notes/development_roadmap.md).
+
+> **Note:** the station-keeping geometry (10 km radius, 20 km reward half-life) is still inherited from a scaled-down Loon rather than derived from our mission. It is tracked as an open question in the roadmap, not a settled decision.
+
 ## How it works
 The agent interacts with a Gym-compatible 3D balloon environment at each timestep. It observes its position, velocity, altitude, ambient pressure, wind vector, and distance to a target location — all normalised to [0, 1]. It then chooses one of three discrete actions: **inflate**, **deflate**, or **do nothing**, which adjusts the balloon's buoyancy and therefore its altitude. By changing altitude, the agent moves into different wind layers and exploits wind currents to navigate toward the target.
 
@@ -93,10 +109,14 @@ TensorBoard picks up new event files as they arrive, so re-running the rsync is 
   - `agents/`: agent utility tests
   - `integration/`: episode integration tests
 
-## Prior work: Google Loon
-[Loon](https://en.wikipedia.org/wiki/Loon_LLC) was a Google/Alphabet project (2011-2021) with the same core goal — station-keeping high-altitude balloons using wind currents. Over its lifetime the project accumulated 218 flight-years and 127 million telemetry data points, demonstrating that RL-based autonomous navigation in the stratosphere is feasible at scale. Loon provided connectivity to remote regions including rural Kenya and disaster-hit Puerto Rico before being shut down in 2021.
+## Reference platform: Google Loon
+[Loon](https://en.wikipedia.org/wiki/Loon_LLC) was a Google/Alphabet project (2011-2021) with the same core goal — station-keeping high-altitude balloons using wind currents. Over its lifetime the project accumulated 218 flight-years and 127 million telemetry data points, and their RL controller remains the strongest published prior art for this task. Loon provided connectivity to remote regions including rural Kenya and disaster-hit Puerto Rico before being shut down in 2021.
 
-Their flight dataset is publicly available and is a key resource for validating our environment and training on real atmospheric conditions:
+**Loon is a reference, not a target.** They flew ~1,800 m³ superpressure balloons carrying ~100 kg payloads on multi-day flights, with solar panels and batteries driving a reversible air-ballast pump. We are flying small zero-pressure balloons for 12 hours on an irreversible consumable budget. Their design decisions are valuable as *validation* — evidence that an approach works at scale — but their problem is not our problem, and several of their subsystems (power management, fleet coordination, ageing) are deliberately out of scope for us.
+
+[`notes/development_roadmap.md`](notes/development_roadmap.md) records which of their decisions we adopt, which we adapt, and which we skip.
+
+Their flight dataset is publicly available and is useful for validating our physics core against real measurements:
 
 https://zenodo.org/records/5119968#.YVNdiGZKio5
 

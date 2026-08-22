@@ -5,7 +5,7 @@ import pytest
 
 from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    R, P0, T0, LAPSE_RATE, TROPOPAUSE_ALT, T_TROPOPAUSE,
+    R, P0, T0, LAPSE_RATE, TROPOPAUSE_ALT, T_TROPOPAUSE, SUPERHEAT_DAY,
 )
 
 
@@ -43,6 +43,60 @@ class TestAtmosphereTemperature:
         assert T_12km == pytest.approx(T_TROPOPAUSE)
         assert T_20km == pytest.approx(T_TROPOPAUSE)
         assert T_30km == pytest.approx(T_TROPOPAUSE)
+
+
+class TestGasTemperature:
+    """Tests for the daytime superheat gas-temperature model (roadmap §3.6).
+
+    Gas temperature is ``T_ambient(z) + SUPERHEAT_DAY`` — an offset above
+    ambient, not the fixed absolute the old ``T_BALLOON`` constant encoded.
+    """
+
+    def test_superheat_offset_is_a_sane_daytime_value(self):
+        """Real daytime ZP superheat is +10 to +30 K."""
+        assert 10.0 <= SUPERHEAT_DAY <= 30.0
+
+    @pytest.mark.parametrize("alt", [0.0, 5_000.0, 11_000.0, 15_000.0, 20_000.0, 30_000.0])
+    def test_gas_temperature_is_ambient_plus_superheat(self, atmosphere, alt):
+        """T_gas(z) - T_ambient(z) should equal SUPERHEAT_DAY at every altitude."""
+        T_gas = atmosphere.gas_temperature(alt)
+        T_amb = atmosphere.temperature(alt)
+        assert T_gas - T_amb == pytest.approx(SUPERHEAT_DAY, rel=1e-9)
+
+    def test_gas_temperature_tracks_ambient_in_troposphere(self, atmosphere):
+        """Gas temperature must fall with ambient, not stay pinned at a constant."""
+        temps = [atmosphere.gas_temperature(alt) for alt in [0, 3_000, 6_000, 9_000]]
+        for i in range(1, len(temps)):
+            assert temps[i] < temps[i - 1]
+
+    def test_gas_temperature_constant_in_stratosphere(self, atmosphere):
+        """Above the tropopause ambient is constant, so gas temperature is too."""
+        assert atmosphere.gas_temperature(15_000.0) == pytest.approx(
+            atmosphere.gas_temperature(25_000.0)
+        )
+
+    def test_gas_temperature_stratospheric_value(self, atmosphere):
+        """Explicit value: 216.65 K ambient + 15 K superheat."""
+        assert atmosphere.gas_temperature(20_000.0) == pytest.approx(
+            T_TROPOPAUSE + SUPERHEAT_DAY
+        )
+
+    def test_gas_warmer_than_ambient_everywhere(self, atmosphere):
+        """Daytime gas is always warmer than the air around it."""
+        for alt in [0, 5_000, 11_000, 20_000, 40_000]:
+            assert atmosphere.gas_temperature(alt) > atmosphere.temperature(alt)
+
+    def test_gas_temperature_returns_float(self, atmosphere):
+        assert isinstance(atmosphere.gas_temperature(20_000.0), (float, np.floating))
+
+    def test_jit_and_python_paths_agree(self, atmosphere, monkeypatch):
+        """Non-JIT fallback must match the numba kernel."""
+        import environments.core.atmosphere as atm_mod
+
+        jit_vals = [atmosphere.gas_temperature(a) for a in [0.0, 8_000.0, 20_000.0]]
+        monkeypatch.setattr(atm_mod, "_JIT_OK", False)
+        py_vals = [atmosphere.gas_temperature(a) for a in [0.0, 8_000.0, 20_000.0]]
+        assert jit_vals == pytest.approx(py_vals, rel=1e-12)
 
 
 class TestAtmospherePressure:
