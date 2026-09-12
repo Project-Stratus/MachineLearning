@@ -1,5 +1,12 @@
 ---
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+        # papers/ intentionally carries multi-MB reference PDFs
+        exclude: ^papers/
   - repo: https://github.com/python/black
     rev: 22.3.0
     hooks:
