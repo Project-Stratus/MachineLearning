@@ -3,6 +3,21 @@ name: Test
 on: [pull_request]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1
+
   pytest:
     runs-on: ubuntu-latest
 
