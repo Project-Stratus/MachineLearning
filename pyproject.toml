@@ -50,6 +50,7 @@ dev = [
   "pytest",
   "pyqt5>=5.15",
   "opencv-python-headless>=4.10.0.84",
+  "build",
 ]
 gpu = [
   "nvidia-cublas-cu12==12.8.4.1",
@@ -74,6 +75,19 @@ packages = [
   "src/models",
   # REMINDER: Do not list src and ensure src/__init__.py does NOT exist
   ]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+# Pin ruff's own default rule set explicitly, so a future ruff upgrade
+# can't silently change what gets flagged.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

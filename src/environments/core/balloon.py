@@ -1,41 +1,96 @@
+import math
 import numpy as np
 
 from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    G, CD, AREA, R, VOL_MAX, VOL_MIN, VEL_MAX, MASS,
-    ALT_DEFAULT, OSCILLATION_AMP, OSCILLATION_PERIOD, SPEED_EPS,
+    G,
+    R,
+    VOL_MAX,
+    VOL_MIN,
+    VEL_MAX,
+    M_HE,
+    PAYLOAD_MASS,
+    BALLAST_INITIAL,
+    BALLAST_DROP,
+    VENT_RATE_MOLES,
+    ALT_DEFAULT,
+    OSCILLATION_AMP,
+    OSCILLATION_PERIOD,
+    SPEED_EPS,
+    MU_REF,
+    T_REF,
+    S_SUTH,
+    SP_VOL_FIXED,
+    SP_PAYLOAD_MASS,
+    AIR_PUMP_RATE,
+    AIR_BLADDER_MAX,
+    AIR_BLADDER_INITIAL,
 )
 
 try:
-    from environments.core.jit_kernels import physics_step_numba, density_numba
+    from environments.core.jit_kernels import (
+        physics_step_numba,
+        density_numba,
+    )
+
     _JIT_OK = True
 except Exception:
     _JIT_OK = False
 
+_PI = math.pi
+_FOUR_THIRDS_PI = 4.0 / 3.0 * _PI
+
 
 class Balloon:
     """
-    Unified balloon model that works in 1-D (altitude only) and 2-D (xy) Gym
-    environments
+    Unified balloon model for 1-D, 2-D and 3-D Gym environments.
 
-    • Positional state is kept in self.pos  (shape = (dim,))
-    • Velocity       ″            self.vel  (shape = (dim,))
-    • Internal clock self.t is advanced automatically when using the 1-arg
-      update(dt) call that the 1-D env makes.
+    Mass model
+    ----------
+    Total mass is the sum of three components tracked separately:
+    - **payload_mass**: fixed structural mass (envelope, gondola, electronics).
+    - **ballast_mass**: expendable ballast that can be dropped to ascend.
+    - **gas mass**: ``n_gas * M_HE``, changes when gas is vented.
+
+    The ``mass`` property returns the current total.  Both ballast drops
+    and gas venting are irreversible — once resources are spent they cannot
+    be recovered.
+
+    Gas tracking
+    ------------
+    Internal state tracks moles of helium (`self.n_gas`).  Volume is derived
+    each step via the ideal gas law: V = n * R * T_gas(z) / P_ambient(z),
+    where ``T_gas(z) = T_ambient(z) + SUPERHEAT_DAY`` comes from the
+    atmosphere model.  As the balloon ascends, ambient pressure drops and
+    volume grows automatically (passive expansion).  The agent vents gas to
+    descend.
+
+    Drag model
+    ----------
+    Drag is proportional to |v_balloon - v_wind|^2 (relative velocity).
+    Frontal area is derived from volume (sphere assumption) and the drag
+    coefficient uses the Morrison (2013) Reynolds-number correlation.
+
+    Integration
+    -----------
+    Velocity Verlet (symplectic, second-order).  Forces are evaluated twice
+    per step — once at the current position and once at the updated position —
+    giving much better energy conservation and stability than forward Euler.
     """
 
     def __init__(
         self,
         dim: int = 1,
-        mass: float = MASS,
+        payload_mass: float = PAYLOAD_MASS,
+        ballast_initial: float = BALLAST_INITIAL,
         position=None,
         velocity=None,
         atmosphere: Atmosphere | None = None,
         oscillate: bool = False,
     ):
-
         self.dim = dim
-        self.mass = mass
+        self.payload_mass = payload_mass
+        self.ballast_mass = ballast_initial
         self.atmosphere = atmosphere if atmosphere is not None else Atmosphere()
 
         # State ----------------------------------------------------------------
@@ -47,14 +102,42 @@ class Balloon:
 
         self.pos = np.ascontiguousarray(position, dtype=np.float64)
         self.vel = np.ascontiguousarray(velocity, dtype=np.float64)
-        self._zero_force = np.zeros(dim, dtype=np.float64)  # reusable zero vector
-        self.t = 0.0  # internal time (s)
+        self._zero_vec = np.zeros(dim, dtype=np.float64)
+        self.t = 0.0
 
-        # Buoyancy --------------------------------------------------------------
-        rho_air = self.atmosphere.density(self.pos[-1])
-        self.stationary_volume = self.mass / rho_air
-        self.extra_volume = 0.0  # volume added by “inflate”
-        self.oscillate = oscillate  # sinusoidal breathing
+        # Gas state ------------------------------------------------------------
+        # Solve for true neutral buoyancy including helium mass.
+        # Simultaneous equations:
+        #   rho_air * V = structural_mass + n_gas * M_HE   (force balance)
+        #   V = n_gas * R * T_gas(z) / P_amb               (ideal gas law)
+        # Solving: n_gas = structural_mass / (rho_air * R * T_gas / P_amb - M_HE)
+        alt = self.pos[-1]
+        p_amb = self.atmosphere.pressure(alt)
+        rho_air = self.atmosphere.density(alt)
+        t_gas = self.atmosphere.gas_temperature(alt)
+        structural_mass = self.payload_mass + self.ballast_mass
+        self.n_gas = structural_mass / (rho_air * R * t_gas / p_amb - M_HE)
+        self.stationary_volume = self.n_gas * R * t_gas / p_amb
+        self.oscillate = oscillate
+
+    # -- Variable mass --------------------------------------------------------
+    @property
+    def mass(self) -> float:
+        """Total mass: payload + ballast + helium gas."""
+        return self.payload_mass + self.ballast_mass + self.n_gas * M_HE
+
+    # -- Volume from gas law --------------------------------------------------
+    def _gas_law_volume(self) -> float:
+        """Ideal gas law volume: V = n·R·T_gas(z) / P_ambient(z), clamped.
+
+        Goes through ``self.atmosphere`` rather than ``gas_law_volume_numba``
+        so a Layer-2 atmosphere that overrides ``gas_temperature`` is honoured
+        here; both underlying calls are themselves JIT-accelerated.
+        """
+        alt = self.pos[-1]
+        p_amb = self.atmosphere.pressure(alt)
+        vol = self.n_gas * R * self.atmosphere.gas_temperature(alt) / p_amb
+        return max(VOL_MIN, min(vol, VOL_MAX))
 
     # 1-D env (altitude) --------------------------------------------------
     @property
@@ -73,7 +156,7 @@ class Balloon:
     def velocity(self, vz):
         self.vel[-1] = vz
 
-    # 2-D env (x–y) ------------------------------------------------------------
+    # 2-D env (x–y) --------------------------------------------------------
     @property
     def x(self):
         return self.pos[0] if self.dim >= 1 else 0.0
@@ -111,30 +194,84 @@ class Balloon:
     def volume(self):
         return self.dynamic_volume(self.t)
 
-    def apply_volume_change(self, delta: float) -> None:
-        self.extra_volume += delta
+    @property
+    def extra_volume(self):
+        """Difference between current gas-law volume and stationary volume."""
+        return self._gas_law_volume() - self.stationary_volume
 
-    # -------------------------------------------------------------------------
-    # Public helper expected by the environments
-    # -------------------------------------------------------------------------
+    def drop_ballast(self, amount: float = BALLAST_DROP) -> None:
+        """Drop expendable ballast to reduce weight (irreversible)."""
+        self.ballast_mass = max(0.0, self.ballast_mass - amount)
+        if self.ballast_mass < 1e-10:
+            self.ballast_mass = 0.0
+
+    def vent_gas(self) -> None:
+        """Vent helium to reduce buoyancy (irreversible).
+
+        Removes a fixed number of moles (VENT_RATE_MOLES) regardless of
+        altitude, giving consistent descent authority across the full operating
+        range. The rate is calibrated to match the old volume-based vent at
+        float altitude — see notes/altitude_control_instability.md.
+        """
+        self.n_gas = max(0.0, self.n_gas - VENT_RATE_MOLES)
+
     def inflate(self, delta: float) -> None:
-        """Alias kept for 1-D env compatibility."""
-        self.apply_volume_change(delta)
+        """Legacy helper — positive delta drops ballast, negative vents gas."""
+        if delta > 0:
+            self.drop_ballast(BALLAST_DROP)
+        elif delta < 0:
+            self.vent_gas()
+
+    # -- Altitude safety primitive --------------------------------------------
+    def clamp_altitude(self, z_min: float, z_max: float) -> tuple[bool, bool]:
+        """Clamp altitude into ``[z_min, z_max]``, zeroing vertical velocity.
+
+        This is the *primitive* the environment's altitude safety layer is
+        built on: it does not decide the band, log anything, or terminate.  It
+        clamps the state and reports which limit was touched so the caller can
+        set the ``at_alt_min`` / ``at_alt_max`` observation flags.
+
+        A limit counts as hit when the balloon is beyond it, or sitting exactly
+        on it with velocity still pointing outward — so the flag stays raised
+        while the balloon is pressed against the limit rather than flickering
+        on alternate steps.
+
+        Returns
+        -------
+        (hit_min, hit_max) : tuple[bool, bool]
+        """
+        z = float(self.pos[-1])
+        vz = float(self.vel[-1])
+        hit_min = bool(z < z_min or (z == z_min and vz < 0.0))
+        hit_max = bool(z > z_max or (z == z_max and vz > 0.0))
+
+        if hit_min:
+            self.pos[-1] = z_min
+            self.vel[-1] = 0.0
+        elif hit_max:
+            self.pos[-1] = z_max
+            self.vel[-1] = 0.0
+
+        return hit_min, hit_max
 
     @property
     def is_deflated(self) -> bool:
         """True if balloon has lost too much volume (helium released)."""
         return self.volume <= VOL_MIN
 
+    @property
+    def is_ballast_empty(self) -> bool:
+        """True when all expendable ballast has been dropped."""
+        return self.ballast_mass <= 0.0
+
     # -------------------------------------------------------------------------
     # Core physics helpers
     # -------------------------------------------------------------------------
     def dynamic_volume(self, t: float) -> float:
-        vol = self.stationary_volume + self.extra_volume
+        vol = self._gas_law_volume()
         if self.oscillate:
             amp = OSCILLATION_AMP * self.stationary_volume
             vol += amp * np.sin(2.0 * np.pi * t / OSCILLATION_PERIOD)
-        # Clamp to physical bounds: cannot go below minimum or above maximum
         return max(VOL_MIN, min(vol, VOL_MAX))
 
     def buoyant_force(self, t: float, rho_air: float | None = None) -> np.ndarray:
@@ -149,16 +286,48 @@ class Balloon:
         f[-1] = -self.mass * G
         return f
 
-    def drag_force(self, rho_air: float | None = None) -> np.ndarray:
-        speed = np.linalg.norm(self.vel)
-        if speed < SPEED_EPS:
+    def drag_force(
+        self, rho_air: float | None = None, wind_vel: np.ndarray | None = None
+    ) -> np.ndarray:
+        """Drag from relative velocity (v_balloon - v_wind)."""
+        if wind_vel is None:
+            wind_vel = self._zero_vec
+        v_rel = self.vel - wind_vel
+        rel_speed = np.linalg.norm(v_rel)
+        if rel_speed < SPEED_EPS:
             return np.zeros(self.dim)
         if rho_air is None:
             rho_air = self.atmosphere.density(self.pos[-1])
-        f_mag = 0.5 * CD * AREA * rho_air * speed**2
-        return -f_mag * (self.vel / speed)
 
-    def update(self, *args, external_force=None, control_force=None):
+        vol = self.dynamic_volume(self.t)
+        area = _sphere_area(vol)
+        diameter = 2.0 * (vol / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
+
+        T = self.atmosphere.temperature(self.pos[-1])
+        mu = MU_REF * (T / T_REF) ** 1.5 * (T_REF + S_SUTH) / (T + S_SUTH)
+        Re = rho_air * rel_speed * diameter / mu
+        cd = _morrison_cd(Re)
+
+        f_mag = 0.5 * cd * area * rho_air * rel_speed**2
+        return -f_mag * (v_rel / rel_speed)
+
+    def update(self, *args, wind_vel=None, external_force=None, control_force=None):
+        """Advance the balloon state by one timestep.
+
+        Parameters
+        ----------
+        dt : float
+            Timestep (seconds).  Passed as the single positional argument,
+            or as the second of two positional arguments (t, dt).
+        wind_vel : array-like, optional
+            Wind velocity vector at the balloon's position.  Drag is computed
+            from (v_balloon - wind_vel).  Defaults to zero (still air).
+        external_force : array-like, optional
+            Additional external force vector (N).
+        control_force : array-like, optional
+            Deprecated.  Treated identically to *external_force* and added
+            to it for backward compatibility.
+        """
         if len(args) == 1:
             dt = float(args[0])
             t = self.t + dt
@@ -168,35 +337,243 @@ class Balloon:
         else:
             raise TypeError("update() expects (dt) or (t, dt)")
 
-        if external_force is None:
-            external_force = self._zero_force
-        elif not isinstance(external_force, np.ndarray) or external_force.dtype != np.float64:
-            external_force = np.asarray(external_force, dtype=np.float64)
-        if control_force is None:
-            control_force = self._zero_force
-        elif not isinstance(control_force, np.ndarray) or control_force.dtype != np.float64:
-            control_force = np.asarray(control_force, dtype=np.float64)
+        if wind_vel is None:
+            wind_vel = self._zero_vec
+        elif not isinstance(wind_vel, np.ndarray) or wind_vel.dtype != np.float64:
+            wind_vel = np.asarray(wind_vel, dtype=np.float64)
 
-        # Compute density once for this step (used by JIT and fallback paths)
+        # Merge external_force and legacy control_force into one vector
+        ext = self._zero_vec
+        if external_force is not None:
+            if (
+                not isinstance(external_force, np.ndarray)
+                or external_force.dtype != np.float64
+            ):
+                external_force = np.asarray(external_force, dtype=np.float64)
+            ext = external_force
+        if control_force is not None:
+            if (
+                not isinstance(control_force, np.ndarray)
+                or control_force.dtype != np.float64
+            ):
+                control_force = np.asarray(control_force, dtype=np.float64)
+            ext = ext + control_force if ext is not self._zero_vec else control_force
+
+        # Compute density at current altitude
         z = self.pos[-1]
         if _JIT_OK:
-            rho_air = float(density_numba(self.atmosphere.p0, self.atmosphere.scale_height, self.atmosphere.temperature, self.atmosphere.molar_mass, R, z))
+            rho_air = float(
+                density_numba(self.atmosphere.p0, self.atmosphere.molar_mass, z)
+            )
         else:
             rho_air = self.atmosphere.density(z)
         vol = self.dynamic_volume(t)
 
         if _JIT_OK:
-            physics_step_numba(self.pos, self.vel, dt, self.mass, G, CD, AREA, rho_air, vol, external_force, control_force, int(self.dim), VEL_MAX)
+            physics_step_numba(
+                self.pos,
+                self.vel,
+                dt,
+                self.mass,
+                G,
+                rho_air,
+                vol,
+                wind_vel,
+                ext,
+                int(self.dim),
+                VEL_MAX,
+                self.atmosphere.p0,
+                self.atmosphere.molar_mass,
+            )
         else:
-            # Fallback: pure-Python path using cached rho_air
-            f_net = (self.buoyant_force(t, rho_air) + self.weight() +
-                     self.drag_force(rho_air) + external_force + control_force)
-            acc = f_net / self.mass
-            self.vel += acc * dt
-            self.vel = np.clip(self.vel, -VEL_MAX, VEL_MAX)
-            self.pos += self.vel * dt
-            if self.pos[-1] < 0.0:
-                self.pos[-1] = 0.0
-                self.vel[-1] = 0.0
+            self._verlet_step_py(dt, t, rho_air, vol, wind_vel, ext)
 
         self.t = t
+
+    def _verlet_step_py(self, dt, t, rho_air, vol, wind_vel, ext):
+        """Pure-Python velocity Verlet integration."""
+        # Geometry
+        area = _sphere_area(vol)
+        diameter = 2.0 * (vol / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
+
+        # Step 1: acceleration at current state
+        a_old = self._compute_accel_py(rho_air, vol, area, diameter, wind_vel, ext)
+
+        # Step 2: update position
+        self.pos += self.vel * dt + 0.5 * a_old * dt**2
+
+        # Step 3: recompute density at new altitude
+        rho_new = self.atmosphere.density(self.pos[-1])
+
+        # Step 4: acceleration at new position (with old velocity)
+        a_new = self._compute_accel_py(rho_new, vol, area, diameter, wind_vel, ext)
+
+        # Step 5: update velocity
+        self.vel += 0.5 * (a_old + a_new) * dt
+        self.vel = np.clip(self.vel, -VEL_MAX, VEL_MAX)
+
+        # Ground clamp
+        if self.pos[-1] < 0.0:
+            self.pos[-1] = 0.0
+            self.vel[-1] = 0.0
+
+    def _compute_accel_py(self, rho_air, vol, area, diameter, wind_vel, ext):
+        """Compute acceleration vector (pure Python)."""
+        # Relative velocity drag
+        v_rel = self.vel - wind_vel
+        rel_speed = np.linalg.norm(v_rel)
+
+        if rel_speed > SPEED_EPS:
+            T = self.atmosphere.temperature(self.pos[-1])
+            mu = MU_REF * (T / T_REF) ** 1.5 * (T_REF + S_SUTH) / (T + S_SUTH)
+            Re = rho_air * rel_speed * diameter / mu
+            cd = _morrison_cd(Re)
+            f_mag = 0.5 * cd * area * rho_air * rel_speed**2
+            drag = -f_mag * (v_rel / rel_speed)
+        else:
+            drag = np.zeros(self.dim)
+
+        # Buoyancy + weight (vertical only)
+        buoy_weight = np.zeros(self.dim)
+        buoy_weight[-1] = rho_air * G * vol - self.mass * G
+
+        f_net = buoy_weight + drag + ext
+        return f_net / self.mass
+
+
+class BalloonSP(Balloon):
+    """Superpressure + air ballast balloon model.
+
+    The helium envelope is sealed and fixed in volume (SP_VOL_FIXED).  Buoyancy
+    changes only because ρ_air(h) changes with altitude.  An internal air
+    bladder provides symmetric, reversible altitude control:
+
+    - Pump air **in**  → heavier → descend
+    - Pump air **out** → lighter → ascend
+
+    Passive stability
+    -----------------
+    F_buoy(h) = ρ_air(h) · g · V_FIXED.  Since ρ_air decreases with altitude
+    and V_FIXED is constant, dF_net/dh < 0 — a genuine restoring force toward
+    the float altitude (unlike the ZP balloon which is neutrally stable).
+
+    Integration
+    -----------
+    Inherits the full Verlet integration from Balloon.  Only ``dynamic_volume``
+    and ``mass`` are overridden so that ``physics_step_numba`` receives the
+    correct (constant) volume and the correct (variable, air-bladder-dependent)
+    mass.
+    """
+
+    def __init__(
+        self,
+        dim: int = 1,
+        payload_mass: float = SP_PAYLOAD_MASS,
+        position=None,
+        velocity=None,
+        atmosphere: Atmosphere | None = None,
+    ):
+        # Skip Balloon.__init__ — completely different state model.
+        self.dim = dim
+        self.payload_mass = payload_mass
+        self.atmosphere = atmosphere if atmosphere is not None else Atmosphere()
+
+        if position is None:
+            position = np.zeros(dim, dtype=float)
+            position[-1] = ALT_DEFAULT
+        if velocity is None:
+            velocity = np.zeros(dim, dtype=float)
+
+        self.pos = np.ascontiguousarray(position, dtype=np.float64)
+        self.vel = np.ascontiguousarray(velocity, dtype=np.float64)
+        self._zero_vec = np.zeros(dim, dtype=np.float64)
+        self.t = 0.0
+        self.oscillate = False
+
+        # Fixed outer volume
+        self.volume_fixed = SP_VOL_FIXED
+        self.stationary_volume = SP_VOL_FIXED  # sealed envelope: never breathes
+
+        # Air bladder starts at midpoint for equal up/down authority
+        self.air_bladder_mass = AIR_BLADDER_INITIAL
+
+        # Fixed helium mass: ensures neutral buoyancy at ALT_DEFAULT with bladder
+        # at midpoint.  Derived from: ρ_air(ALT_DEFAULT) · V_FIXED = m_total.
+        # This balance is a pure force balance, so it is unaffected by the
+        # superheat model — but the *state* of that helium is not, so the mole
+        # count (and hence the envelope's superpressure) is derived with the
+        # gas temperature.  Layer 4 §6.6 needs it for envelope-state work.
+        rho_air = self.atmosphere.density(ALT_DEFAULT)
+        self.m_he_fixed = rho_air * SP_VOL_FIXED - payload_mass - AIR_BLADDER_INITIAL
+        self.n_he_fixed = self.m_he_fixed / M_HE
+
+    # -- Envelope state --------------------------------------------------------
+    def superpressure(self) -> float:
+        """Internal-minus-ambient pressure (Pa) of the sealed helium envelope."""
+        alt = self.pos[-1]
+        p_int = (
+            self.n_he_fixed
+            * R
+            * self.atmosphere.gas_temperature(alt)
+            / self.volume_fixed
+        )
+        return p_int - self.atmosphere.pressure(alt)
+
+    # -- Variable mass ---------------------------------------------------------
+    @property
+    def mass(self) -> float:
+        """Total mass: payload + fixed helium + air bladder."""
+        return self.payload_mass + self.m_he_fixed + self.air_bladder_mass
+
+    # -- Fixed volume ----------------------------------------------------------
+    def dynamic_volume(self, t: float) -> float:
+        """Always returns the fixed envelope volume."""
+        return self.volume_fixed
+
+    # -- Bladder state flags ---------------------------------------------------
+    @property
+    def is_deflated(self) -> bool:
+        """Always False — SP envelope cannot deflate."""
+        return False
+
+    @property
+    def is_ballast_empty(self) -> bool:
+        """Always False — SP has no expendable ballast."""
+        return False
+
+    @property
+    def is_bladder_full(self) -> bool:
+        """True when air bladder is at maximum capacity."""
+        return self.air_bladder_mass >= AIR_BLADDER_MAX
+
+    @property
+    def is_bladder_empty(self) -> bool:
+        """True when air bladder has been fully emptied."""
+        return self.air_bladder_mass <= 0.0
+
+    # -- Bladder control -------------------------------------------------------
+    def pump_in(self, amount: float = AIR_PUMP_RATE) -> None:
+        """Pump air into bladder → heavier → descend (reversible)."""
+        self.air_bladder_mass = min(AIR_BLADDER_MAX, self.air_bladder_mass + amount)
+
+    def pump_out(self, amount: float = AIR_PUMP_RATE) -> None:
+        """Pump air out of bladder → lighter → ascend (reversible)."""
+        self.air_bladder_mass = max(0.0, self.air_bladder_mass - amount)
+
+
+# ---- Module-level helpers (pure Python, used by Balloon methods) ------------
+
+
+def _sphere_area(volume: float) -> float:
+    r = (volume / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
+    return _PI * r * r
+
+
+def _morrison_cd(Re: float) -> float:
+    if Re < 1e-8:
+        return 0.0
+    term1 = 24.0 / Re
+    term2 = 2.6 * (Re / 5.0) / (1.0 + (Re / 5.0) ** 1.52)
+    term3 = 0.411 * (Re / 263000.0) ** (-7.94) / (1.0 + (Re / 263000.0) ** (-8.0))
+    term4 = Re**0.80 / 461000.0
+    return term1 + term2 + term3 + term4

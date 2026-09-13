@@ -1,10 +1,109 @@
-"""Tests for the Atmosphere class - pressure and density calculations."""
+"""Tests for the Atmosphere class - ISA temperature, pressure and density."""
 
 import numpy as np
 import pytest
 
-from environments.core.atmosphere import Atmosphere
-from environments.core.constants import R
+from environments.core.constants import (
+    R,
+    P0,
+    T0,
+    LAPSE_RATE,
+    TROPOPAUSE_ALT,
+    T_TROPOPAUSE,
+    SUPERHEAT_DAY,
+)
+
+
+class TestAtmosphereTemperature:
+    """Tests for ISA temperature profile."""
+
+    def test_temperature_at_sea_level(self, atmosphere):
+        """Temperature at sea level should be 288.15 K."""
+        T = atmosphere.temperature(0.0)
+        assert T == pytest.approx(T0)
+
+    def test_temperature_decreases_in_troposphere(self, atmosphere):
+        """Temperature should decrease with altitude in the troposphere."""
+        temps = [atmosphere.temperature(alt) for alt in [0, 3000, 6000, 9000]]
+        for i in range(1, len(temps)):
+            assert temps[i] < temps[i - 1]
+
+    def test_temperature_lapse_rate(self, atmosphere):
+        """Temperature drop should match the ISA lapse rate (6.5 K/km)."""
+        T_0 = atmosphere.temperature(0.0)
+        T_5km = atmosphere.temperature(5000.0)
+        expected_drop = LAPSE_RATE * 5000.0  # 32.5 K
+        assert (T_0 - T_5km) == pytest.approx(expected_drop, rel=1e-6)
+
+    def test_temperature_at_tropopause(self, atmosphere):
+        """Temperature at the tropopause should be ~216.65 K."""
+        T = atmosphere.temperature(TROPOPAUSE_ALT)
+        assert T == pytest.approx(T_TROPOPAUSE, rel=1e-6)
+
+    def test_temperature_constant_in_stratosphere(self, atmosphere):
+        """Temperature should be constant above the tropopause."""
+        T_12km = atmosphere.temperature(12_000.0)
+        T_20km = atmosphere.temperature(20_000.0)
+        T_30km = atmosphere.temperature(30_000.0)
+        assert T_12km == pytest.approx(T_TROPOPAUSE)
+        assert T_20km == pytest.approx(T_TROPOPAUSE)
+        assert T_30km == pytest.approx(T_TROPOPAUSE)
+
+
+class TestGasTemperature:
+    """Tests for the daytime superheat gas-temperature model (roadmap §3.6).
+
+    Gas temperature is ``T_ambient(z) + SUPERHEAT_DAY`` — an offset above
+    ambient, not the fixed absolute the old ``T_BALLOON`` constant encoded.
+    """
+
+    def test_superheat_offset_is_a_sane_daytime_value(self):
+        """Real daytime ZP superheat is +10 to +30 K."""
+        assert 10.0 <= SUPERHEAT_DAY <= 30.0
+
+    @pytest.mark.parametrize(
+        "alt", [0.0, 5_000.0, 11_000.0, 15_000.0, 20_000.0, 30_000.0]
+    )
+    def test_gas_temperature_is_ambient_plus_superheat(self, atmosphere, alt):
+        """T_gas(z) - T_ambient(z) should equal SUPERHEAT_DAY at every altitude."""
+        T_gas = atmosphere.gas_temperature(alt)
+        T_amb = atmosphere.temperature(alt)
+        assert T_gas - T_amb == pytest.approx(SUPERHEAT_DAY, rel=1e-9)
+
+    def test_gas_temperature_tracks_ambient_in_troposphere(self, atmosphere):
+        """Gas temperature must fall with ambient, not stay pinned at a constant."""
+        temps = [atmosphere.gas_temperature(alt) for alt in [0, 3_000, 6_000, 9_000]]
+        for i in range(1, len(temps)):
+            assert temps[i] < temps[i - 1]
+
+    def test_gas_temperature_constant_in_stratosphere(self, atmosphere):
+        """Above the tropopause ambient is constant, so gas temperature is too."""
+        assert atmosphere.gas_temperature(15_000.0) == pytest.approx(
+            atmosphere.gas_temperature(25_000.0)
+        )
+
+    def test_gas_temperature_stratospheric_value(self, atmosphere):
+        """Explicit value: 216.65 K ambient + 15 K superheat."""
+        assert atmosphere.gas_temperature(20_000.0) == pytest.approx(
+            T_TROPOPAUSE + SUPERHEAT_DAY
+        )
+
+    def test_gas_warmer_than_ambient_everywhere(self, atmosphere):
+        """Daytime gas is always warmer than the air around it."""
+        for alt in [0, 5_000, 11_000, 20_000, 40_000]:
+            assert atmosphere.gas_temperature(alt) > atmosphere.temperature(alt)
+
+    def test_gas_temperature_returns_float(self, atmosphere):
+        assert isinstance(atmosphere.gas_temperature(20_000.0), (float, np.floating))
+
+    def test_jit_and_python_paths_agree(self, atmosphere, monkeypatch):
+        """Non-JIT fallback must match the numba kernel."""
+        import environments.core.atmosphere as atm_mod
+
+        jit_vals = [atmosphere.gas_temperature(a) for a in [0.0, 8_000.0, 20_000.0]]
+        monkeypatch.setattr(atm_mod, "_JIT_OK", False)
+        py_vals = [atmosphere.gas_temperature(a) for a in [0.0, 8_000.0, 20_000.0]]
+        assert jit_vals == pytest.approx(py_vals, rel=1e-12)
 
 
 class TestAtmospherePressure:
@@ -13,7 +112,7 @@ class TestAtmospherePressure:
     def test_pressure_at_sea_level(self, atmosphere):
         """Pressure at sea level should match P0 (approximately 101325 Pa)."""
         p0 = atmosphere.pressure(0.0)
-        assert 1.0e5 < p0 < 1.05e5, f"Sea level pressure {p0} outside expected range"
+        assert p0 == pytest.approx(P0, rel=1e-6)
 
     def test_pressure_decreases_with_altitude(self, atmosphere):
         """Pressure should decrease monotonically with altitude."""
@@ -29,8 +128,18 @@ class TestAtmospherePressure:
     def test_pressure_at_10km(self, atmosphere):
         """Pressure at 10km should be roughly 26% of sea level (26.5 kPa)."""
         p_10km = atmosphere.pressure(10_000.0)
-        # Standard atmosphere: ~26.5 kPa at 10km
-        assert 2.0e4 < p_10km < 3.5e4, f"Pressure at 10km ({p_10km}) outside expected range"
+        assert (
+            2.0e4 < p_10km < 3.5e4
+        ), f"Pressure at 10km ({p_10km}) outside expected range"
+
+    def test_pressure_continuous_at_tropopause(self, atmosphere):
+        """Pressure should be continuous across the tropopause boundary."""
+        p_below = atmosphere.pressure(TROPOPAUSE_ALT - 1.0)
+        p_at = atmosphere.pressure(TROPOPAUSE_ALT)
+        p_above = atmosphere.pressure(TROPOPAUSE_ALT + 1.0)
+        # Should be monotonically decreasing and close together
+        assert p_below > p_at > p_above
+        assert abs(p_below - p_at) / p_at < 0.001
 
     def test_pressure_positive_at_high_altitude(self, atmosphere):
         """Pressure should remain positive even at very high altitudes."""
@@ -63,11 +172,13 @@ class TestAtmosphereDensity:
             )
 
     def test_density_at_10km(self, atmosphere):
-        """Density at 10km should be roughly 40% of sea level."""
+        """Density at 10km should be roughly 34% of sea level (ISA value)."""
         rho_10km = atmosphere.density(10_000.0)
         rho_0 = atmosphere.density(0.0)
         ratio = rho_10km / rho_0
-        assert 0.3 < ratio < 0.5, f"Density ratio at 10km ({ratio}) outside expected range"
+        assert (
+            0.3 < ratio < 0.5
+        ), f"Density ratio at 10km ({ratio}) outside expected range"
 
     def test_density_positive_at_high_altitude(self, atmosphere):
         """Density should remain positive even at very high altitudes."""
@@ -81,25 +192,51 @@ class TestAtmosphereDensity:
 
 
 class TestAtmosphereConsistency:
-    """Tests for consistency between pressure and density."""
+    """Tests for consistency between pressure, temperature and density."""
 
     def test_ideal_gas_law_consistency(self, atmosphere):
-        """Pressure and density should be consistent with ideal gas law: P = rho * R * T / M."""
-        for alt in [0, 5000, 10000, 15000, 20000]:
+        """Pressure and density should be consistent with ideal gas law at all altitudes."""
+        for alt in [0, 5000, 10000, 11000, 15000, 20000]:
             p = atmosphere.pressure(alt)
             rho = atmosphere.density(alt)
-            T = atmosphere.temperature
+            T = atmosphere.temperature(alt)
             M = atmosphere.molar_mass
 
             # From ideal gas: P = rho * R * T / M
             p_calculated = rho * R * T / M
-            assert np.isclose(p, p_calculated, rtol=1e-6), (
-                f"Ideal gas law mismatch at {alt}m: P={p}, calculated={p_calculated}"
-            )
+            assert np.isclose(
+                p, p_calculated, rtol=1e-6
+            ), f"Ideal gas law mismatch at {alt}m: P={p}, calculated={p_calculated}"
 
     def test_atmosphere_parameters_reasonable(self, atmosphere):
         """Atmosphere parameters should have physically reasonable values."""
         assert 100_000 < atmosphere.p0 < 110_000, "P0 should be ~101325 Pa"
-        assert 7000 < atmosphere.scale_height < 9000, "Scale height should be ~8500 m"
-        assert 250 < atmosphere.temperature < 320, "Temperature should be reasonable"
-        assert 0.025 < atmosphere.molar_mass < 0.035, "Molar mass of air should be ~0.029 kg/mol"
+        assert (
+            0.025 < atmosphere.molar_mass < 0.035
+        ), "Molar mass of air should be ~0.029 kg/mol"
+
+
+class TestAtmosphereViscosity:
+    """Tests for dynamic viscosity via Sutherland's law."""
+
+    def test_viscosity_at_sea_level(self, atmosphere):
+        """Dynamic viscosity at sea level should be ~1.79e-5 Pa·s."""
+        mu = atmosphere.dynamic_viscosity(0.0)
+        assert 1.7e-5 < mu < 1.9e-5
+
+    def test_viscosity_decreases_with_altitude(self, atmosphere):
+        """Viscosity should decrease with altitude (lower temperature)."""
+        mu_0 = atmosphere.dynamic_viscosity(0.0)
+        mu_10km = atmosphere.dynamic_viscosity(10_000.0)
+        assert mu_10km < mu_0
+
+    def test_viscosity_constant_in_stratosphere(self, atmosphere):
+        """Viscosity should be constant in the stratosphere (constant T)."""
+        mu_15km = atmosphere.dynamic_viscosity(15_000.0)
+        mu_25km = atmosphere.dynamic_viscosity(25_000.0)
+        assert mu_15km == pytest.approx(mu_25km, rel=1e-6)
+
+    def test_viscosity_positive(self, atmosphere):
+        """Viscosity should always be positive."""
+        for alt in [0, 5000, 11000, 20000, 40000]:
+            assert atmosphere.dynamic_viscosity(alt) > 0

@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from environments.core.atmosphere import Atmosphere
-from environments.core.balloon import Balloon
+from environments.core.balloon import Balloon, BalloonSP
+from environments.core.constants import ALT_DEFAULT, OBS_WIDTH
 from environments.core.wind_field import WindField
 from environments.envs.balloon_3d_env import Balloon3DEnv
 
@@ -65,19 +66,30 @@ def wind_field():
 # -----------------------------------------------------------------------------
 # Environment fixtures
 # -----------------------------------------------------------------------------
+#: Short episodes keep the suite fast; the wind pattern is the one the agents
+#: actually train on, so tests exercise the configuration that matters.
+ENV_TEST_CONFIG = {"time_max": 100, "wind_pattern": "altitude_shear_2d"}
+
+
+def make_env(dim: int, **overrides) -> Balloon3DEnv:
+    """Construct a test env: short episode, training wind pattern, no render."""
+    return Balloon3DEnv(
+        dim=dim, render_mode=None, config={**ENV_TEST_CONFIG, **overrides}
+    )
+
+
 @pytest.fixture(params=[1, 2, 3])
 def env_any_dim(request):
     """Parametrized environment for all dimensions."""
-    dim = request.param
-    env = Balloon3DEnv(dim=dim, render_mode=None, config={"time_max": 100})
-    yield env, dim
+    env = make_env(request.param)
+    yield env, request.param
     env.close()
 
 
 @pytest.fixture
 def env_1d():
     """1D environment."""
-    env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 100})
+    env = make_env(1)
     yield env
     env.close()
 
@@ -85,7 +97,7 @@ def env_1d():
 @pytest.fixture
 def env_2d():
     """2D environment."""
-    env = Balloon3DEnv(dim=2, render_mode=None, config={"time_max": 100})
+    env = make_env(2)
     yield env
     env.close()
 
@@ -93,7 +105,7 @@ def env_2d():
 @pytest.fixture
 def env_3d():
     """3D environment."""
-    env = Balloon3DEnv(dim=3, render_mode=None, config={"time_max": 100})
+    env = make_env(3)
     yield env
     env.close()
 
@@ -101,7 +113,46 @@ def env_3d():
 @pytest.fixture
 def env_short_episode():
     """Environment with very short time limit for quick termination tests."""
-    env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 10})
+    env = make_env(1, time_max=10)
+    yield env
+    env.close()
+
+
+# -----------------------------------------------------------------------------
+# SP Balloon fixtures
+# -----------------------------------------------------------------------------
+@pytest.fixture
+def balloon_sp_1d(atmosphere):
+    """1D SP balloon at default altitude."""
+    return BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
+
+
+@pytest.fixture
+def balloon_sp_3d(atmosphere):
+    """3D SP balloon at default position."""
+    return BalloonSP(dim=3, atmosphere=atmosphere, position=[0.0, 0.0, ALT_DEFAULT])
+
+
+@pytest.fixture(params=[1, 2, 3])
+def env_sp_any_dim(request):
+    """Parametrized SP environment for all dimensions."""
+    env = make_env(request.param, balloon_type="superpressure")
+    yield env, request.param
+    env.close()
+
+
+@pytest.fixture
+def env_sp_1d():
+    """1D SP environment."""
+    env = make_env(1, balloon_type="superpressure")
+    yield env
+    env.close()
+
+
+@pytest.fixture
+def env_sp_3d():
+    """3D SP environment."""
+    env = make_env(3, balloon_type="superpressure")
     yield env
     env.close()
 
@@ -116,8 +167,11 @@ def rng():
 
 
 def expected_obs_size(dim: int) -> int:
-    """Calculate expected observation size for a given dimension.
+    """Observation width for a given dimension.
 
-    Observation layout: goal(d) + volume(1) + position(d) + delta(d) + velocity(d) + pressure(1) + wind(d)
+    The layout is frozen at :data:`OBS_WIDTH` (143) and is **identical** for
+    dim 1, 2 and 3 — fields meaningless in a dimension are zeroed, never
+    omitted (Layer 1 contract §1, roadmap §2.1).  The ``dim`` argument is
+    accepted only so call sites read naturally; it is deliberately ignored.
     """
-    return 5 * dim + 2
+    return OBS_WIDTH

@@ -1,16 +1,28 @@
-- [ ] Unify drag model to use relative velocity: drag should be proportional to `(balloon_vel - wind_vel)^2` rather than the current setup where wind is an additive external force and drag opposes absolute velocity independently. Current approach works at low wind speeds but will matter as wind fields become more realistic.
-- [ ] Altitude-dependent temperature model: replace isothermal atmosphere (`T_AIR = 288.15K` constant) with a temperature profile that decreases ~6.5K/km in the troposphere and levels off in the stratosphere. Affects density, pressure, buoyancy, and drag across the 0–21km operating range.
-- [ ] Volume-dependent cross-sectional area and drag coefficient: `AREA` and `CD` are currently fixed constants. Both should vary with balloon volume — frontal area scales with radius (from volume), and CD varies with Reynolds number. Inflate/deflate actions currently have no aerodynamic side-effect.
-- [ ] Upgrade integrator from forward Euler to symplectic (e.g. velocity Verlet): at `DT=1.0s` Euler is adequate for gentle manoeuvres but accumulates energy error and can become unstable during rapid altitude changes or strong wind shear transitions.
-- [ ] Passive gas expansion/compression with altitude: balloon volume currently only changes via agent inflate/deflate actions. Real balloon gas expands as ambient pressure drops with altitude (ideal gas law), which is central to superpressure and zero-pressure balloon behaviour.
-- [ ] Variable balloon mass: `MASS = 2.0` is constant. Real balloons lose mass through gas venting/leakage and ballast drops. Relevant if the action space is eventually expanded to include gas management.
+# Near-term tasks
+
+Small, tactical work items. For sequencing and the staged development plan, see
+[`notes/development_roadmap.md`](notes/development_roadmap.md) — this file tracks
+individual chores, the roadmap tracks capability layers. Where an item belongs to
+a layer, it is cross-referenced.
+
+## Known simplifications
+- [x] ~~Altitude-dependent gas temperature: replace constant T_BALLOON (20°C)~~ — done in §3.6. `T_BALLOON = 293.15 K` is gone; gas temperature is now `T_ambient(z) + SUPERHEAT_DAY` (15 K). The full radiative model is still Layer 2 §4.4.
+- [ ] Ambient temperature is still ISA, which §3.10 measured at **+16.1 K too warm** against tropical flight data — a bigger error than the superheat offset it carries. Blocked on open question §9.5 (launch latitude); the fix is Layer 2 §4.2's reanalysis profiles. *Roadmap: §3.10.*
+- [ ] (Low priority) Add vertical wind component: the wind field currently has no vertical component (fz = 0). Stratospheric vertical winds are small but non-zero; adding them would improve realism. *Roadmap: Layer 2 §4.2.*
+- [ ] (Low priority) Recompute volume at Verlet half-step: during integration, density is recomputed at the updated altitude but volume (V = nRT/P) is not. For DT=1s the error is negligible, but recomputing would make the two force evaluations fully consistent.
+- [ ] (Low priority) Extend ISA beyond two layers: the atmosphere model covers the troposphere and stratosphere only. Adding the mesosphere and above would allow operations beyond ~50 km, but is unnecessary for the current ~25 km ceiling. *Roadmap: Layer 2 §4.2 (superseded if we move to reanalysis profiles).*
 
 ## Training performance
-- [ ] Enable GPU training: `USE_GPU = False` in `qrdqn.py`. Essential now that network is `[512, 512, 256]` with 51 quantiles (~440K params, ~5x previous). CPU can't keep up as architecture scales toward Loon.
-- [ ] Vectorised environments for QR-DQN: PPO uses `SubprocVecEnv` but QR-DQN runs a single env. Add 4-8 parallel envs to increase data throughput.
-- [ ] Consider increasing `train_freq` (currently 4) to 8-16 to reduce gradient updates per env step, trading sample efficiency for wall-clock speed.
+- [ ] (Low priority) Increase `train_freq` (currently 4) to 8-16 to reduce gradient updates per env step. Trades sample efficiency for wall-clock speed — not worth doing unless training time becomes a bottleneck again, since GPU and vectorised envs already address the main performance issues.
 
-## Project-level goals
-- [ ] Develop an accurate 3-D virtual environment for training. This environment would need to simulate real-world atmospheric conditions and feed the agent with data in the same format as it would receive from a real balloon.
-- [ ] Develop an RL model which can control the balloon by increasing or decreasing altitude. Justify our RL framework based on the problem and literature and create an agent with a high performance in the virtual environment.
-- [ ] Use real world data. Take advantage of publicly available flight data to improve training and validation.
+## Next phases
+Superseded by [`notes/development_roadmap.md`](notes/development_roadmap.md).
+The three items previously listed here map onto the layered plan as:
+
+- Weather VAE → **Layer 2** (§4.1)
+- Sensor readings in place of the true wind vector → **Layer 4** (§6.1)
+- Real-world flight data → **Layer 1** §3.10 (validate the physics core against the
+  Loon flight CSV) and **Layer 2** §4.3 (geographic and seasonal diversity)
+
+Do not add forward-looking plans here — put them in the roadmap so sequencing
+stays in one place.
