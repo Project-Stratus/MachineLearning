@@ -1,15 +1,28 @@
 import numpy as np
 
 from environments.core.constants import (
-    P0, R, M_AIR, G,
-    T0, LAPSE_RATE, TROPOPAUSE_ALT, T_TROPOPAUSE,
-    MU_REF, T_REF, S_SUTH, SUPERHEAT_DAY,
+    P0,
+    R,
+    M_AIR,
+    G,
+    T0,
+    LAPSE_RATE,
+    TROPOPAUSE_ALT,
+    T_TROPOPAUSE,
+    MU_REF,
+    T_REF,
+    S_SUTH,
+    SUPERHEAT_DAY,
 )
 
 try:
     from environments.core.jit_kernels import (
-        pressure_numba, density_numba, temperature_numba, gas_temperature_numba,
+        pressure_numba,
+        density_numba,
+        temperature_numba,
+        gas_temperature_numba,
     )
+
     _JIT_OK = True
 except Exception:
     _JIT_OK = False

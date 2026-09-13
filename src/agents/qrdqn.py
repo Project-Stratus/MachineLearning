@@ -12,7 +12,7 @@ from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
 from sb3_contrib import QRDQN
 
-import environments  # registers the Balloon3D-v0 environment
+import environments  # noqa: F401 -- side effect: registers the Balloon3D-v0 environment
 from environments.core.constants import DECISION_INTERVAL, TIME_MAX
 from environments.wrappers.decision_interval import DecisionIntervalWrapper
 from agents.baselines import baselines_for_dim, make_baseline
@@ -416,7 +416,9 @@ def train(
     else:
         total_timesteps = int(total_timesteps)
         if total_timesteps <= 0:
-            raise ValueError(f"total_timesteps must be positive, got {total_timesteps}.")
+            raise ValueError(
+                f"total_timesteps must be positive, got {total_timesteps}."
+            )
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
 
     n = n_envs if n_envs is not None else N_ENVS

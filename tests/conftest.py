@@ -73,8 +73,9 @@ ENV_TEST_CONFIG = {"time_max": 100, "wind_pattern": "altitude_shear_2d"}
 
 def make_env(dim: int, **overrides) -> Balloon3DEnv:
     """Construct a test env: short episode, training wind pattern, no render."""
-    return Balloon3DEnv(dim=dim, render_mode=None,
-                        config={**ENV_TEST_CONFIG, **overrides})
+    return Balloon3DEnv(
+        dim=dim, render_mode=None, config={**ENV_TEST_CONFIG, **overrides}
+    )
 
 
 @pytest.fixture(params=[1, 2, 3])

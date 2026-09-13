@@ -3,9 +3,14 @@
 import numpy as np
 import pytest
 
-from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    R, P0, T0, LAPSE_RATE, TROPOPAUSE_ALT, T_TROPOPAUSE, SUPERHEAT_DAY,
+    R,
+    P0,
+    T0,
+    LAPSE_RATE,
+    TROPOPAUSE_ALT,
+    T_TROPOPAUSE,
+    SUPERHEAT_DAY,
 )
 
 
@@ -56,7 +61,9 @@ class TestGasTemperature:
         """Real daytime ZP superheat is +10 to +30 K."""
         assert 10.0 <= SUPERHEAT_DAY <= 30.0
 
-    @pytest.mark.parametrize("alt", [0.0, 5_000.0, 11_000.0, 15_000.0, 20_000.0, 30_000.0])
+    @pytest.mark.parametrize(
+        "alt", [0.0, 5_000.0, 11_000.0, 15_000.0, 20_000.0, 30_000.0]
+    )
     def test_gas_temperature_is_ambient_plus_superheat(self, atmosphere, alt):
         """T_gas(z) - T_ambient(z) should equal SUPERHEAT_DAY at every altitude."""
         T_gas = atmosphere.gas_temperature(alt)
@@ -121,7 +128,9 @@ class TestAtmospherePressure:
     def test_pressure_at_10km(self, atmosphere):
         """Pressure at 10km should be roughly 26% of sea level (26.5 kPa)."""
         p_10km = atmosphere.pressure(10_000.0)
-        assert 2.0e4 < p_10km < 3.5e4, f"Pressure at 10km ({p_10km}) outside expected range"
+        assert (
+            2.0e4 < p_10km < 3.5e4
+        ), f"Pressure at 10km ({p_10km}) outside expected range"
 
     def test_pressure_continuous_at_tropopause(self, atmosphere):
         """Pressure should be continuous across the tropopause boundary."""
@@ -167,7 +176,9 @@ class TestAtmosphereDensity:
         rho_10km = atmosphere.density(10_000.0)
         rho_0 = atmosphere.density(0.0)
         ratio = rho_10km / rho_0
-        assert 0.3 < ratio < 0.5, f"Density ratio at 10km ({ratio}) outside expected range"
+        assert (
+            0.3 < ratio < 0.5
+        ), f"Density ratio at 10km ({ratio}) outside expected range"
 
     def test_density_positive_at_high_altitude(self, atmosphere):
         """Density should remain positive even at very high altitudes."""
@@ -193,14 +204,16 @@ class TestAtmosphereConsistency:
 
             # From ideal gas: P = rho * R * T / M
             p_calculated = rho * R * T / M
-            assert np.isclose(p, p_calculated, rtol=1e-6), (
-                f"Ideal gas law mismatch at {alt}m: P={p}, calculated={p_calculated}"
-            )
+            assert np.isclose(
+                p, p_calculated, rtol=1e-6
+            ), f"Ideal gas law mismatch at {alt}m: P={p}, calculated={p_calculated}"
 
     def test_atmosphere_parameters_reasonable(self, atmosphere):
         """Atmosphere parameters should have physically reasonable values."""
         assert 100_000 < atmosphere.p0 < 110_000, "P0 should be ~101325 Pa"
-        assert 0.025 < atmosphere.molar_mass < 0.035, "Molar mass of air should be ~0.029 kg/mol"
+        assert (
+            0.025 < atmosphere.molar_mass < 0.035
+        ), "Molar mass of air should be ~0.029 kg/mol"
 
 
 class TestAtmosphereViscosity:

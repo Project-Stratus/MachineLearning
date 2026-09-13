@@ -174,7 +174,9 @@ class MomentumExplorer:
         seed: int | None = None,
     ) -> None:
         if alt_max <= alt_min:
-            raise ValueError(f"alt_max must exceed alt_min, got ({alt_min}, {alt_max}).")
+            raise ValueError(
+                f"alt_max must exceed alt_min, got ({alt_min}, {alt_max})."
+            )
         if perturb_every < 1:
             raise ValueError(f"perturb_every must be >= 1, got {perturb_every}.")
         if perturb_sigma < 0.0 or deadband < 0.0:
@@ -202,7 +204,9 @@ class MomentumExplorer:
         self.target_alt = np.empty(n_envs, dtype=np.float64)
         # Random phase per env, so the actors do not all perturb on the same
         # step — otherwise n_envs actors are one actor with n_envs copies.
-        self._countdown = self.rng.integers(1, self.perturb_every + 1, size=n_envs).astype(np.int64)
+        self._countdown = self.rng.integers(
+            1, self.perturb_every + 1, size=n_envs
+        ).astype(np.int64)
         self.reset_envs(np.ones(n_envs, dtype=bool))
 
     def reset_envs(self, mask: np.ndarray | None = None) -> None:

@@ -24,7 +24,6 @@ from agents.utils import MomentumExplorer
 from environments.core.constants import DECISION_INTERVAL, TIME_MAX
 from environments.wrappers.decision_interval import DecisionIntervalWrapper
 
-
 BALLOON_TYPES = ("zero_pressure", "superpressure")
 
 
@@ -372,6 +371,7 @@ class TestTimestepOverride:
 
     def test_train_accepts_a_total_timesteps_override(self):
         import inspect
+
         sig = inspect.signature(qrdqn.train)
         assert "total_timesteps" in sig.parameters
         assert sig.parameters["total_timesteps"].default is None
@@ -384,8 +384,10 @@ class TestTimestepOverride:
     def test_rejects_non_positive_budgets(self, bad, monkeypatch):
         """Caught before any env or model is built, so a typo fails in a second
         rather than after the vec-env spins up."""
+
         def boom(*a, **k):
             raise AssertionError("built the env despite an invalid budget")
+
         monkeypatch.setattr(qrdqn, "_build_vec_env", boom)
         with pytest.raises(ValueError, match="total_timesteps must be positive"):
             qrdqn.train(dim=3, total_timesteps=bad)

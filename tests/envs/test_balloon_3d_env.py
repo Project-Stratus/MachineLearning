@@ -36,7 +36,11 @@ from environments.core.constants import (
 )
 from environments.core.reward import l2_distance
 from environments.envs.balloon_3d_env import (
-    AMBIENT_IDX, WIND_COL_CHANNELS, WIND_COL_WIDTH, Actions, Balloon3DEnv,
+    AMBIENT_IDX,
+    WIND_COL_CHANNELS,
+    WIND_COL_WIDTH,
+    Actions,
+    Balloon3DEnv,
 )
 from tests.conftest import expected_obs_size, make_env
 
@@ -98,7 +102,10 @@ class TestWindColumnResolution:
     def test_horizontal_grid_still_follows_wind_cells(self, env_3d):
         assert env_3d.wind.cells == env_3d.cfg["wind_cells"]
         assert env_3d.wind._fx_grid.shape == (
-            env_3d.wind.cells, env_3d.wind.cells, env_3d.wind.cells_z)
+            env_3d.wind.cells,
+            env_3d.wind.cells,
+            env_3d.wind.cells_z,
+        )
 
     def test_vertical_resolution_is_overridable(self):
         env = make_env(3, wind_cells_z=31)
@@ -122,8 +129,9 @@ class TestWindColumnResolution:
         col = obs[:WIND_COL_WIDTH].reshape(WIND_COL_LEVELS, WIND_COL_CHANNELS)
         mag_bearing = col[:, :2]
         deltas = np.abs(np.diff(mag_bearing, axis=0)).sum(axis=1)
-        assert np.all(deltas > 1e-6), \
-            "adjacent column levels share a wind cell — vertical grid too coarse"
+        assert np.all(
+            deltas > 1e-6
+        ), "adjacent column levels share a wind cell — vertical grid too coarse"
 
 
 class TestBalloon3DEnvReset:
@@ -158,7 +166,7 @@ class TestBalloon3DEnvReset:
 
     def test_reset_clears_safety_flags_and_resource_hold(self, env_1d):
         env_1d.reset(seed=42)
-        env_1d.step(2)                      # start a resource hold
+        env_1d.step(2)  # start a resource hold
         assert env_1d._omega_steps > 0
         env_1d.reset(seed=42)
         assert env_1d._omega_steps == 0
@@ -231,7 +239,9 @@ class TestScenarioRandomisation:
 
     def test_wind_layers_vary_for_altitude_shear_2d(self, env_3d):
         assert env_3d.cfg["wind_pattern"] == "altitude_shear_2d"
-        layers = {round(s["wind_layers"], 9) for s in self._scenarios(env_3d, range(10))}
+        layers = {
+            round(s["wind_layers"], 9) for s in self._scenarios(env_3d, range(10))
+        }
         assert len(layers) == 10
 
     def test_wind_layers_fixed_for_other_patterns(self):
@@ -331,7 +341,9 @@ class TestInfoDict:
         assert "distance" in info
         for _ in range(20):
             _, _, term, trunc, info = env.step(env.action_space.sample())
-            assert "distance" in info, "TWR evaluation reads info['distance'] every step"
+            assert (
+                "distance" in info
+            ), "TWR evaluation reads info['distance'] every step"
             assert np.isfinite(info["distance"])
             if term or trunc:
                 break
@@ -372,8 +384,8 @@ class TestBalloon3DEnvActions:
     def test_action_lut_mapping(self, env_any_dim):
         env, _ = env_any_dim
         assert env._action_lut[0] == -1  # vent / pump in  -> descend
-        assert env._action_lut[1] == 0   # nothing
-        assert env._action_lut[2] == 1   # drop ballast / pump out -> ascend
+        assert env._action_lut[1] == 0  # nothing
+        assert env._action_lut[2] == 1  # drop ballast / pump out -> ascend
 
     def test_drop_ballast_reduces_mass(self, env_1d):
         env_1d.reset(seed=42)
@@ -482,7 +494,7 @@ class TestAltitudeSafetyLayer:
         env_1d._balloon.vel[-1] = 0.0
         raised = 0
         for _ in range(30):
-            obs, _, _, _, _ = env_1d.step(2)   # keep pushing up
+            obs, _, _, _, _ = env_1d.step(2)  # keep pushing up
             raised += int(obs[AMBIENT_IDX["at_alt_max"]] == 1.0)
         assert raised >= 25, f"flag raised on only {raised}/30 steps while pressed"
 
@@ -504,7 +516,7 @@ class TestSoftHorizontalBounds:
         env = make_env(dim)
         try:
             env.reset(seed=1)
-            env._balloon.pos[0] = 3.0 * XY_MAX     # 150 km out
+            env._balloon.pos[0] = 3.0 * XY_MAX  # 150 km out
             env._balloon.pos[1] = -3.0 * XY_MAX
             obs, reward, terminated, _, info = env.step(1)
 
@@ -558,12 +570,14 @@ class TestResourceAccounting:
 
     def test_omega_is_the_fraction_of_the_initial_budget(self, env_1d):
         env_1d.reset(seed=1)
-        _, _, _, _, info = env_1d.step(2)      # drop ballast
-        assert info["resource_consumed_frac"] == pytest.approx(BALLAST_DROP / BALLAST_INITIAL)
+        _, _, _, _, info = env_1d.step(2)  # drop ballast
+        assert info["resource_consumed_frac"] == pytest.approx(
+            BALLAST_DROP / BALLAST_INITIAL
+        )
 
         env_1d.reset(seed=1)
         n0 = env_1d._balloon.n_gas
-        _, _, _, _, info = env_1d.step(0)      # vent gas
+        _, _, _, _, info = env_1d.step(0)  # vent gas
         expected = (n0 - env_1d._balloon.n_gas) / env_1d._init_n_gas
         assert info["resource_consumed_frac"] == pytest.approx(expected)
         assert 0.0 < expected < 1.0
@@ -600,7 +614,7 @@ class TestResourceAccounting:
         env_1d.step(2)
         for _ in range(DECISION_INTERVAL // 2):
             env_1d.step(1)
-        env_1d.step(2)                       # re-arm mid-hold
+        env_1d.step(2)  # re-arm mid-hold
         for _ in range(DECISION_INTERVAL - 1):
             _, _, _, _, info = env_1d.step(1)
             assert info["reward_components"]["resource_factor"] < 1.0
@@ -616,12 +630,15 @@ class TestResourceAccounting:
         correctly held penalty gives a ratio near RESOURCE_PENALTY_BASE
         (~0.97); a diluted one gives ~0.9995.
         """
+
         def interval_return(first_action):
             env = make_env(2)
             try:
                 env.reset(seed=5)
-                return sum(env.step(first_action if i == 0 else 1)[1]
-                           for i in range(DECISION_INTERVAL))
+                return sum(
+                    env.step(first_action if i == 0 else 1)[1]
+                    for i in range(DECISION_INTERVAL)
+                )
             finally:
                 env.close()
 
@@ -633,7 +650,7 @@ class TestResourceAccounting:
         """A pump against a full bladder moves no air, so it costs nothing."""
         env_sp_1d.reset(seed=1)
         env_sp_1d._balloon.air_bladder_mass = AIR_BLADDER_MAX
-        _, _, _, _, info = env_sp_1d.step(0)   # pump in — already full
+        _, _, _, _, info = env_sp_1d.step(0)  # pump in — already full
         assert info["resource_consumed_frac"] == 0.0
         assert info["reward_components"]["resource_factor"] == 1.0
 

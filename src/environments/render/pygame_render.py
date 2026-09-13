@@ -8,14 +8,18 @@ the same split-panel visual as the original `_render_frame()`.
 The renderer is completely stateless except for the Pygame window/clock,
 so you can reuse one instance across episodes or even different envs.
 """
+
 from __future__ import annotations
 import math
 import os
 import warnings
 from typing import Tuple, Dict, Any
 import numpy as np
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
-import pygame
+
+warnings.filterwarnings(
+    "ignore", message="pkg_resources is deprecated", category=UserWarning
+)
+import pygame  # noqa: E402 -- must follow the filterwarnings() call above
 
 
 class PygameRenderer:
@@ -28,7 +32,7 @@ class PygameRenderer:
         x_centers: np.ndarray,
         y_centers: np.ndarray,
         wind_cells: int,
-        dim: int
+        dim: int,
     ):
         self.window_w, self.window_h = window_size
         self.x_range, self.y_range, self.z_range = x_range, y_range, z_range
@@ -110,13 +114,21 @@ class PygameRenderer:
         # ------------- altitude bar --------------------------------------
         alt_surface = pygame.Surface((self.right_w, self.window_h))
         alt_surface.fill((250, 250, 250))
-        pygame.draw.line(alt_surface, (0, 0, 0),
-                         (self.right_w // 2, 0),
-                         (self.right_w // 2, self.window_h), 2)
+        pygame.draw.line(
+            alt_surface,
+            (0, 0, 0),
+            (self.right_w // 2, 0),
+            (self.right_w // 2, self.window_h),
+            2,
+        )
         z_b = balloon_pos[-1]
         z_g = goal_pos[-1]
-        bz = (1.0 - (z_b - self.z_range[0]) / (self.z_range[1] - self.z_range[0])) * self.window_h
-        gz = (1.0 - (z_g - self.z_range[0]) / (self.z_range[1] - self.z_range[0])) * self.window_h
+        bz = (
+            1.0 - (z_b - self.z_range[0]) / (self.z_range[1] - self.z_range[0])
+        ) * self.window_h
+        gz = (
+            1.0 - (z_g - self.z_range[0]) / (self.z_range[1] - self.z_range[0])
+        ) * self.window_h
         pygame.draw.circle(alt_surface, (255, 0, 0), (self.right_w // 2, int(bz)), 6)
         pygame.draw.circle(alt_surface, (0, 200, 0), (self.right_w // 2, int(gz)), 5)
 
@@ -132,10 +144,17 @@ class PygameRenderer:
         btn_y = 8
         btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
         pygame.draw.rect(self.window, (60, 60, 60), btn_rect, border_radius=5)
-        pygame.draw.rect(self.window, (180, 180, 180), btn_rect, width=1, border_radius=5)
+        pygame.draw.rect(
+            self.window, (180, 180, 180), btn_rect, width=1, border_radius=5
+        )
         btn_text = small_font.render("Next (N)", True, (220, 220, 220))
-        self.window.blit(btn_text, (btn_x + (btn_w - btn_text.get_width()) // 2,
-                                     btn_y + (btn_h - btn_text.get_height()) // 2))
+        self.window.blit(
+            btn_text,
+            (
+                btn_x + (btn_w - btn_text.get_width()) // 2,
+                btn_y + (btn_h - btn_text.get_height()) // 2,
+            ),
+        )
 
         pygame.display.update()
 
@@ -177,10 +196,17 @@ class PygameRenderer:
         btn_y = ty + text_surf.get_height() + 24
         btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
         pygame.draw.rect(self.window, (70, 70, 70), btn_rect, border_radius=6)
-        pygame.draw.rect(self.window, (200, 200, 200), btn_rect, width=1, border_radius=6)
+        pygame.draw.rect(
+            self.window, (200, 200, 200), btn_rect, width=1, border_radius=6
+        )
         btn_text = small_font.render("Next (N)", True, (255, 255, 255))
-        self.window.blit(btn_text, (btn_x + (btn_w - btn_text.get_width()) // 2,
-                                     btn_y + (btn_h - btn_text.get_height()) // 2))
+        self.window.blit(
+            btn_text,
+            (
+                btn_x + (btn_w - btn_text.get_width()) // 2,
+                btn_y + (btn_h - btn_text.get_height()) // 2,
+            ),
+        )
 
         pygame.display.update()
 

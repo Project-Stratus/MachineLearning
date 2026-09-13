@@ -5,13 +5,18 @@ import numpy as np
 import pytest
 
 from environments.core.constants import (
-    STATION_RADIUS, REWARD_DROPOFF, REWARD_HALFLIFE,
-    RESOURCE_PENALTY_BASE, RESOURCE_PENALTY_SLOPE,
+    STATION_RADIUS,
+    REWARD_DROPOFF,
+    REWARD_HALFLIFE,
+    RESOURCE_PENALTY_BASE,
+    RESOURCE_PENALTY_SLOPE,
 )
 from environments.core.reward import (
-    l2_distance, balloon_reward, time_within_radius, _resource_factor,
+    l2_distance,
+    balloon_reward,
+    time_within_radius,
+    _resource_factor,
 )
-
 
 EXPECTED_KEYS = {"station", "decay", "base", "resource_factor"}
 
@@ -134,7 +139,10 @@ class TestRewardStructure:
         pos = np.array([750.0])
         goal = np.array([0.0])
         _, _, distance = balloon_reward(
-            balloon_pos=pos, goal_pos=goal, dim=1, terminated=False,
+            balloon_pos=pos,
+            goal_pos=goal,
+            dim=1,
+            terminated=False,
         )
         assert distance == pytest.approx(l2_distance(pos, goal, dim=1))
 
@@ -146,7 +154,10 @@ class TestRewardStructure:
                 pos = np.array([30_000.0, 40_000.0, 18_000.0])
                 goal = np.array([0.0, 0.0]) if dim == 2 else np.array([0.0, 0.0, 0.0])
             total, components, distance = balloon_reward(
-                balloon_pos=pos, goal_pos=goal, dim=dim, terminated=False,
+                balloon_pos=pos,
+                goal_pos=goal,
+                dim=dim,
+                terminated=False,
                 resource_consumed_frac=0.4,
             )
             assert np.isfinite(total)
@@ -168,9 +179,7 @@ class TestRewardStructure:
 class TestDistanceShaping:
     """Flat plateau inside, cliff at the boundary, exponential decay outside."""
 
-    @pytest.mark.parametrize(
-        "distance", [0.0, 1.0, 2_500.0, 9_999.0, STATION_RADIUS]
-    )
+    @pytest.mark.parametrize("distance", [0.0, 1.0, 2_500.0, 9_999.0, STATION_RADIUS])
     def test_flat_one_inside_radius(self, distance):
         """Reward is a flat 1.0 anywhere inside the radius, boundary included."""
         total, c, _ = _reward_1d(distance)
@@ -194,7 +203,7 @@ class TestDistanceShaping:
     def test_halflife_actually_halves(self, n_halflives):
         """Each half-life past the boundary halves the reward."""
         total, _, _ = _reward_1d(STATION_RADIUS + n_halflives * REWARD_HALFLIFE)
-        assert total == pytest.approx(REWARD_DROPOFF * 0.5 ** n_halflives, rel=1e-9)
+        assert total == pytest.approx(REWARD_DROPOFF * 0.5**n_halflives, rel=1e-9)
 
     def test_halving_is_scale_free(self):
         """Ratio between points one half-life apart is 0.5 wherever you sample."""
@@ -205,7 +214,9 @@ class TestDistanceShaping:
 
     def test_custom_halflife_respected(self):
         total, _, _ = _reward_1d(
-            15_000.0, station_radius=5_000.0, reward_dropoff=0.8,
+            15_000.0,
+            station_radius=5_000.0,
+            reward_dropoff=0.8,
             reward_halflife=10_000.0,
         )
         assert total == pytest.approx(0.4, rel=1e-9)
@@ -338,9 +349,7 @@ class TestTimeWithinRadius:
     def test_boundary_counts_as_inside(self):
         """Inclusive boundary, matching balloon_reward's flat plateau."""
         assert time_within_radius([STATION_RADIUS]) == pytest.approx(1.0)
-        assert time_within_radius(
-            [STATION_RADIUS + 1e-6]
-        ) == pytest.approx(0.0)
+        assert time_within_radius([STATION_RADIUS + 1e-6]) == pytest.approx(0.0)
 
     def test_accepts_list_and_ndarray_alike(self):
         distances = [1_000.0, 12_000.0, 8_000.0, 40_000.0]

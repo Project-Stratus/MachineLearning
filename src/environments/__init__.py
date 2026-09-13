@@ -1,5 +1,5 @@
 from gymnasium.envs.registration import register
-from environments.core.constants import *       # noqa
+from environments.core.constants import *  # noqa
 
 # outdated 1D and 2D environments
 # register(

@@ -7,9 +7,20 @@ import pytest
 
 from environments.core.balloon import Balloon
 from environments.core.constants import (
-    G, R, M_HE, ALT_DEFAULT, ALT_MAX, ALT_SAFE_MIN, ALT_SAFE_MAX,
-    VOL_MAX, VOL_MIN, SUPERHEAT_DAY,
-    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE_MOLES,
+    G,
+    R,
+    M_HE,
+    ALT_DEFAULT,
+    ALT_MAX,
+    ALT_SAFE_MIN,
+    ALT_SAFE_MAX,
+    VOL_MAX,
+    VOL_MIN,
+    SUPERHEAT_DAY,
+    PAYLOAD_MASS,
+    BALLAST_INITIAL,
+    BALLAST_DROP,
+    VENT_RATE_MOLES,
 )
 
 
@@ -34,7 +45,9 @@ class TestBalloonInitialization:
 
     def test_custom_position_3d(self, atmosphere):
         """3D balloon should accept custom position."""
-        balloon = Balloon(dim=3, atmosphere=atmosphere, position=[100.0, 200.0, 15_000.0])
+        balloon = Balloon(
+            dim=3, atmosphere=atmosphere, position=[100.0, 200.0, 15_000.0]
+        )
         assert balloon.x == 100.0
         assert balloon.y == 200.0
         assert balloon.altitude == 15_000.0
@@ -126,8 +139,12 @@ class TestSuperheatModel:
         balloon = Balloon(dim=1, atmosphere=atmosphere, position=[5_000.0])
         for alt in [2_000.0, 8_000.0, 14_000.0, 20_000.0]:
             balloon.pos[0] = alt
-            expected = (balloon.n_gas * R * atmosphere.gas_temperature(alt)
-                        / atmosphere.pressure(alt))
+            expected = (
+                balloon.n_gas
+                * R
+                * atmosphere.gas_temperature(alt)
+                / atmosphere.pressure(alt)
+            )
             expected = max(VOL_MIN, min(expected, VOL_MAX))
             assert balloon.volume == pytest.approx(expected, rel=1e-9)
 
@@ -140,6 +157,7 @@ class TestSuperheatModel:
     def test_vent_rate_moles_calibrated_at_float_altitude(self, atmosphere):
         """VENT_RATE_MOLES must be derived with the float-altitude gas temperature."""
         from environments.core.constants import VENT_RATE
+
         p = atmosphere.pressure(ALT_DEFAULT)
         t_gas = atmosphere.gas_temperature(ALT_DEFAULT)
         assert VENT_RATE_MOLES == pytest.approx(p * VENT_RATE / (R * t_gas), rel=1e-9)
@@ -156,10 +174,13 @@ class TestActuatorSymmetry:
     def test_vent_and_ballast_forces_match_at_float(self, atmosphere):
         """Net force per vent == net force per drop, helium's own weight included."""
         from environments.core.constants import VENT_RATE
+
         rho = atmosphere.density(ALT_DEFAULT)
         lost_buoyancy = rho * G * VENT_RATE
         lost_weight = VENT_RATE_MOLES * M_HE * G
-        assert (lost_buoyancy - lost_weight) == pytest.approx(BALLAST_DROP * G, rel=1e-9)
+        assert (lost_buoyancy - lost_weight) == pytest.approx(
+            BALLAST_DROP * G, rel=1e-9
+        )
 
     def test_one_vent_and_one_drop_move_the_balloon_oppositely(self, atmosphere):
         """Equal and opposite net force after a single action of each kind."""
@@ -281,8 +302,9 @@ class TestBallastDrop:
 
     def test_is_ballast_empty(self, atmosphere):
         """is_ballast_empty should be True when ballast is exhausted."""
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[15_000.0],
-                          ballast_initial=0.1)
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[15_000.0], ballast_initial=0.1
+        )
         assert not balloon.is_ballast_empty
         balloon.drop_ballast(0.1)
         assert balloon.is_ballast_empty
@@ -461,7 +483,9 @@ class TestBalloonPhysicsIntegration:
 
     def test_ground_clamping(self, atmosphere):
         """Balloon should not go below ground (z=0)."""
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[100.0], velocity=[-200.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[100.0], velocity=[-200.0]
+        )
         balloon.update(10.0)
         assert balloon.altitude >= 0.0
         assert balloon.velocity >= 0.0
@@ -552,8 +576,9 @@ class TestClampAltitude:
 
     def test_no_clamp_inside_band(self, atmosphere):
         """Inside the band nothing moves and no limit is reported."""
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[20_000.0],
-                          velocity=[3.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[20_000.0], velocity=[3.0]
+        )
         hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
         assert (hit_min, hit_max) == (False, False)
         assert balloon.altitude == 20_000.0
@@ -561,8 +586,9 @@ class TestClampAltitude:
 
     def test_clamp_below_min(self, atmosphere):
         """Below the floor: snapped up, vertical velocity zeroed, hit_min set."""
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[14_000.0],
-                          velocity=[-5.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[14_000.0], velocity=[-5.0]
+        )
         hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
         assert hit_min is True
         assert hit_max is False
@@ -571,8 +597,9 @@ class TestClampAltitude:
 
     def test_clamp_above_max(self, atmosphere):
         """Above the ceiling: snapped down, vertical velocity zeroed, hit_max set."""
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[26_000.0],
-                          velocity=[5.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[26_000.0], velocity=[5.0]
+        )
         hit_min, hit_max = balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
         assert hit_min is False
         assert hit_max is True
@@ -588,9 +615,12 @@ class TestClampAltitude:
 
     def test_horizontal_state_untouched(self, atmosphere):
         """Only the vertical axis is affected."""
-        balloon = Balloon(dim=3, atmosphere=atmosphere,
-                          position=[100.0, -200.0, 30_000.0],
-                          velocity=[4.0, -6.0, 8.0])
+        balloon = Balloon(
+            dim=3,
+            atmosphere=atmosphere,
+            position=[100.0, -200.0, 30_000.0],
+            velocity=[4.0, -6.0, 8.0],
+        )
         balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX)
         assert balloon.x == 100.0
         assert balloon.y == -200.0
@@ -605,18 +635,21 @@ class TestClampAltitude:
         Otherwise the flag flickers off on the step after a clamp even though
         the balloon is still being held.
         """
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX],
-                          velocity=[2.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX], velocity=[2.0]
+        )
         assert balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (False, True)
 
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MIN],
-                          velocity=[-2.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MIN], velocity=[-2.0]
+        )
         assert balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (True, False)
 
     def test_on_limit_moving_inward_is_not_a_hit(self, atmosphere):
         """Leaving the limit under its own power should clear the flag."""
-        balloon = Balloon(dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX],
-                          velocity=[-2.0])
+        balloon = Balloon(
+            dim=1, atmosphere=atmosphere, position=[ALT_SAFE_MAX], velocity=[-2.0]
+        )
         assert balloon.clamp_altitude(ALT_SAFE_MIN, ALT_SAFE_MAX) == (False, False)
         assert balloon.velocity == -2.0
 
@@ -747,7 +780,6 @@ class TestVerletIntegration:
         for _ in range(50):
             balloon.drop_ballast()
         z0 = balloon.altitude
-        v0 = balloon.velocity  # 0.0
 
         balloon.update(1.0)
 
@@ -778,8 +810,12 @@ class TestVerletIntegration:
         # Altitude should increase monotonically (smooth ascent to terminal velocity)
         reversals = 0
         for i in range(2, len(altitudes)):
-            if (altitudes[i] - altitudes[i-1]) * (altitudes[i-1] - altitudes[i-2]) < 0:
+            if (altitudes[i] - altitudes[i - 1]) * (
+                altitudes[i - 1] - altitudes[i - 2]
+            ) < 0:
                 reversals += 1
-        assert reversals < 5, f"Too many direction reversals ({reversals}), suggests instability"
+        assert (
+            reversals < 5
+        ), f"Too many direction reversals ({reversals}), suggests instability"
         # Should have risen overall
         assert altitudes[-1] > 8_000.0

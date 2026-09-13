@@ -8,9 +8,16 @@ import pytest
 
 from environments.core.balloon import BalloonSP
 from environments.core.constants import (
-    G, R, M_HE, ALT_DEFAULT, ALT_SAFE_MIN, ALT_SAFE_MAX,
+    G,
+    R,
+    M_HE,
+    ALT_DEFAULT,
+    ALT_SAFE_MIN,
+    ALT_SAFE_MAX,
     SP_VOL_FIXED,
-    AIR_PUMP_RATE, AIR_BLADDER_MAX, AIR_BLADDER_INITIAL,
+    AIR_PUMP_RATE,
+    AIR_BLADDER_MAX,
+    AIR_BLADDER_INITIAL,
 )
 
 
@@ -74,8 +81,9 @@ class TestBalloonSPThermalState:
         """superpressure() = nRT_gas/V - P_ambient at the current altitude."""
         b = BalloonSP(dim=1, atmosphere=atmosphere, position=[ALT_DEFAULT])
         t_gas = atmosphere.gas_temperature(ALT_DEFAULT)
-        expected = (b.n_he_fixed * R * t_gas / SP_VOL_FIXED
-                    - atmosphere.pressure(ALT_DEFAULT))
+        expected = b.n_he_fixed * R * t_gas / SP_VOL_FIXED - atmosphere.pressure(
+            ALT_DEFAULT
+        )
         assert b.superpressure() == pytest.approx(expected, rel=1e-9)
 
     def test_superpressure_is_positive_across_the_band(self, atmosphere):
@@ -270,7 +278,7 @@ class TestBalloonSPForceSymmetry:
         b_in.pump_in()
         b_out.pump_out()
 
-        delta_in = b_in.mass - m0    # positive: heavier
+        delta_in = b_in.mass - m0  # positive: heavier
         delta_out = m0 - b_out.mass  # positive: lighter
 
         assert abs(delta_in) == pytest.approx(abs(delta_out), rel=0.01)
@@ -291,7 +299,7 @@ class TestBalloonSPForceSymmetry:
         F_after_in = rho * G * SP_VOL_FIXED - b_in.mass * G
         F_after_out = rho * G * SP_VOL_FIXED - b_out.mass * G
 
-        delta_in = F_neutral - F_after_in    # magnitude of downward shift
+        delta_in = F_neutral - F_after_in  # magnitude of downward shift
         delta_out = F_after_out - F_neutral  # magnitude of upward shift
 
         assert abs(delta_in) == pytest.approx(abs(delta_out), rel=0.01)

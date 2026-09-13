@@ -23,6 +23,7 @@ observation's wind column (see :func:`default_cells_z`).  A cubic grid coarse
 enough to be cheap horizontally cannot resolve two adjacent 250 m column
 levels, which is where the agent's only above/below signal lives.
 """
+
 from __future__ import annotations
 import json
 import math
@@ -34,8 +35,10 @@ from environments.core.constants import WIND_COL_LEVELS, WIND_COL_SPACING
 
 try:
     from environments.core.jit_kernels import (
-        wind_sample_idx_numba, wind_sample_column_numba,
+        wind_sample_idx_numba,
+        wind_sample_column_numba,
     )
+
     _JIT_OK = True
 except Exception:
     _JIT_OK = False
@@ -47,9 +50,11 @@ except Exception:
 CELLS_Z_MAX = 2048
 
 
-def default_cells_z(z_range: Tuple[float, float],
-                    spacing: float = WIND_COL_SPACING,
-                    max_cells: int = CELLS_Z_MAX) -> int:
+def default_cells_z(
+    z_range: Tuple[float, float],
+    spacing: float = WIND_COL_SPACING,
+    max_cells: int = CELLS_Z_MAX,
+) -> int:
     """Vertical cell count that resolves a column sampled every ``spacing``.
 
     Nyquist: a column at 250 m spacing needs cells of at most 125 m, otherwise
@@ -138,12 +143,21 @@ class WindField:
         zi = zi if zi <= self.z_range[1] else self.z_range[1]
 
         if _JIT_OK:
-            fx, fy = wind_sample_idx_numba(xi, yi, zi,
-                                             self.x_range[0], self.inv_dx,
-                                             self.y_range[0], self.inv_dy,
-                                             self.z_range[0], self.inv_dz,
-                                             self.cells, self.cells_z,
-                                             self._fx_grid, self._fy_grid)
+            fx, fy = wind_sample_idx_numba(
+                xi,
+                yi,
+                zi,
+                self.x_range[0],
+                self.inv_dx,
+                self.y_range[0],
+                self.inv_dy,
+                self.z_range[0],
+                self.inv_dz,
+                self.cells,
+                self.cells_z,
+                self._fx_grid,
+                self._fy_grid,
+            )
         else:
             # Fallback must mirror the kernel's arithmetic exactly — the older
             # `searchsorted` version disagreed with it by one cell on points
@@ -160,9 +174,14 @@ class WindField:
         # _sample_buf[2] stays 0.0 from init
         return self._sample_buf
 
-    def sample_column(self, x: float, y: float, z_center: float,
-                      levels: int = WIND_COL_LEVELS,
-                      spacing: float = WIND_COL_SPACING) -> np.ndarray:
+    def sample_column(
+        self,
+        x: float,
+        y: float,
+        z_center: float,
+        levels: int = WIND_COL_LEVELS,
+        spacing: float = WIND_COL_SPACING,
+    ) -> np.ndarray:
         """Return shape ``(levels, 2)`` of ``(fx, fy)`` on a vertical column.
 
         Level ``i`` (``i = 0 .. levels-1``) is sampled at
@@ -184,11 +203,24 @@ class WindField:
 
         if _JIT_OK:
             wind_sample_column_numba(
-                x, y, z_center, spacing,
-                self.x_range[0], self.x_range[1], self.inv_dx,
-                self.y_range[0], self.y_range[1], self.inv_dy,
-                self.z_range[0], self.z_range[1], self.inv_dz,
-                self.cells, self.cells_z, self._fx_grid, self._fy_grid, buf,
+                x,
+                y,
+                z_center,
+                spacing,
+                self.x_range[0],
+                self.x_range[1],
+                self.inv_dx,
+                self.y_range[0],
+                self.y_range[1],
+                self.inv_dy,
+                self.z_range[0],
+                self.z_range[1],
+                self.inv_dz,
+                self.cells,
+                self.cells_z,
+                self._fx_grid,
+                self._fy_grid,
+                buf,
             )
             return buf
 
@@ -248,9 +280,21 @@ class WindField:
             self._fy_grid = mag * np.cos(theta)
 
         else:  # "sinusoid" default
-            self._fx_grid = (mag * 0.5 * (np.sin(2 * np.pi * X / (xr[1] - xr[0]))
-                             + 0.5 * np.sin(4 * np.pi * X / (xr[1] - xr[0]))))
-            self._fy_grid = (mag * 0.5 * (np.cos(2 * np.pi * Y / (yr[1] - yr[0]))
-                             + 0.5 * np.cos(4 * np.pi * Y / (yr[1] - yr[0]))))
+            self._fx_grid = (
+                mag
+                * 0.5
+                * (
+                    np.sin(2 * np.pi * X / (xr[1] - xr[0]))
+                    + 0.5 * np.sin(4 * np.pi * X / (xr[1] - xr[0]))
+                )
+            )
+            self._fy_grid = (
+                mag
+                * 0.5
+                * (
+                    np.cos(2 * np.pi * Y / (yr[1] - yr[0]))
+                    + 0.5 * np.cos(4 * np.pi * Y / (yr[1] - yr[0]))
+                )
+            )
             # gentle altitude shear
             self._fx_grid += (mag / 4) * np.sin(2 * np.pi * Z / (zr[1] - zr[0]))

@@ -37,6 +37,7 @@ the numerical abort), the wrapper returns immediately with the accumulated
 reward up to that point and ``terminated=True``.  Altitude limits no longer
 terminate — the env's safety layer clamps instead.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -60,7 +61,8 @@ class DecisionIntervalWrapper(gym.Wrapper):
             cfg = getattr(base, "cfg", None)
             decision_interval = (
                 cfg.get("decision_interval", DECISION_INTERVAL)
-                if isinstance(cfg, dict) else DECISION_INTERVAL
+                if isinstance(cfg, dict)
+                else DECISION_INTERVAL
             )
         self.decision_interval = max(1, int(decision_interval))
 

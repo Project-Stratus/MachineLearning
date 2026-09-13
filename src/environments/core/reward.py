@@ -60,8 +60,11 @@ import math
 import numpy as np
 
 from environments.core.constants import (
-    STATION_RADIUS, REWARD_DROPOFF, REWARD_HALFLIFE,
-    RESOURCE_PENALTY_BASE, RESOURCE_PENALTY_SLOPE,
+    STATION_RADIUS,
+    REWARD_DROPOFF,
+    REWARD_HALFLIFE,
+    RESOURCE_PENALTY_BASE,
+    RESOURCE_PENALTY_SLOPE,
 )
 
 
@@ -165,9 +168,7 @@ def balloon_reward(
         station_component = 0.0
         excess = distance - station_radius
         halflife_m = max(reward_halflife, 1.0)
-        decay_component = reward_dropoff * math.exp(
-            _LN_HALF / halflife_m * excess
-        )
+        decay_component = reward_dropoff * math.exp(_LN_HALF / halflife_m * excess)
 
     base = station_component + decay_component
     resource_factor = _resource_factor(resource_consumed_frac)
@@ -185,9 +186,7 @@ def balloon_reward(
 # ------------------------------------------------------------------ #
 # evaluation metrics
 # ------------------------------------------------------------------ #
-def time_within_radius(
-    distances, station_radius: float = STATION_RADIUS
-) -> float:
+def time_within_radius(distances, station_radius: float = STATION_RADIUS) -> float:
     """Time-within-radius (TWR): fraction of samples inside *station_radius*.
 
     Parameters

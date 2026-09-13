@@ -86,6 +86,7 @@ Configuration
 Tunable constants are in DEFAULTS dict, pass `config` argument
 to override any of them without sub-classing.
 """
+
 from __future__ import annotations
 
 import math
@@ -95,35 +96,65 @@ import gymnasium as gym
 from gymnasium import spaces
 from enum import Enum
 from typing import Literal, Dict, Any, Tuple
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
-import pygame
+
+warnings.filterwarnings(
+    "ignore", message="pkg_resources is deprecated", category=UserWarning
+)
+import pygame  # noqa: E402 -- must follow the filterwarnings() call above
 
 try:
     from numba import njit as _njit
 except Exception:  # pragma: no cover - numba is a hard dependency, but stay honest
+
     def _njit(**_kwargs):
         def _deco(fn):
             return fn
+
         return _deco
 
-from environments.core.balloon import Balloon, BalloonSP
-from environments.core.atmosphere import Atmosphere
-from environments.core.wind_field import WindField
-from environments.core.reward import balloon_reward, l2_distance
-from environments.render.pygame_render import PygameRenderer
-from environments.core.constants import (
-    VOL_MAX, ALT_MAX, XY_MAX, VEL_MAX, VEL_Z_OBS_NORM, P_MAX, DT,
-    P0, M_AIR, G, RHO_0,
-    BALLAST_DROP, BALLAST_INITIAL,
+
+# Kept below the pygame/warnings setup above for grouping, not because
+# these imports depend on it.
+from environments.core.balloon import Balloon, BalloonSP  # noqa: E402
+from environments.core.atmosphere import Atmosphere  # noqa: E402
+from environments.core.wind_field import WindField  # noqa: E402
+from environments.core.reward import balloon_reward, l2_distance  # noqa: E402
+from environments.render.pygame_render import PygameRenderer  # noqa: E402
+from environments.core.constants import (  # noqa: E402
+    VOL_MAX,
+    ALT_MAX,
+    XY_MAX,
+    VEL_MAX,
+    VEL_Z_OBS_NORM,
+    P_MAX,
+    DT,
+    P0,
+    M_AIR,
+    G,
+    RHO_0,
+    BALLAST_DROP,
+    BALLAST_INITIAL,
     MIN_START_DISTANCE,
-    INIT_VEL_SIGMA, INIT_GAS_FRAC_RANGE, INIT_BALLAST_LOSS_MAX,
+    INIT_VEL_SIGMA,
+    INIT_GAS_FRAC_RANGE,
+    INIT_BALLAST_LOSS_MAX,
     AIR_BLADDER_MAX,
-    TIME_MAX, DECISION_INTERVAL,
-    ALT_SAFE_MIN, ALT_SAFE_MAX, ALT_DEFAULT, XY_ABORT,
-    WIND_COL_LEVELS, WIND_COL_SPACING, WIND_MAG_NORM,
-    OBS_WIDTH, DIST_NORM,
-    STATION_RADIUS, REWARD_HALFLIFE,
-    STATION_RADIUS_1D, REWARD_HALFLIFE_1D, DIST_NORM_1D,
+    TIME_MAX,
+    DECISION_INTERVAL,
+    ALT_SAFE_MIN,
+    ALT_SAFE_MAX,
+    ALT_DEFAULT,
+    XY_ABORT,
+    WIND_COL_LEVELS,
+    WIND_COL_SPACING,
+    WIND_MAG_NORM,
+    OBS_WIDTH,
+    DIST_NORM,
+    STATION_RADIUS,
+    REWARD_HALFLIFE,
+    STATION_RADIUS_1D,
+    REWARD_HALFLIFE_1D,
+    DIST_NORM_1D,
 )
 
 _JIT_WARMED = False  # whether numba JIT has been warmed up
@@ -137,39 +168,39 @@ _JIT_WARMED = False  # whether numba JIT has been warmed up
 # GreedyWind baseline silently misreads the column, which is exactly the kind of
 # failure that does not announce itself.
 WIND_COL_CHANNELS = 3
-WIND_COL_WIDTH = WIND_COL_LEVELS * WIND_COL_CHANNELS      # 123
-WIND_COL_CENTRE = WIND_COL_LEVELS // 2                    # 20 -> balloon altitude
+WIND_COL_WIDTH = WIND_COL_LEVELS * WIND_COL_CHANNELS  # 123
+WIND_COL_CENTRE = WIND_COL_LEVELS // 2  # 20 -> balloon altitude
 
-CH_MAG = 0          # |wind| / WIND_MAG_NORM, in [0, 1]
-CH_BEARING = 1      # signed angle(goal_dir -> wind_dir) / pi, in [-1, 1]
+CH_MAG = 0  # |wind| / WIND_MAG_NORM, in [0, 1]
+CH_BEARING = 1  # signed angle(goal_dir -> wind_dir) / pi, in [-1, 1]
 CH_UNCERTAINTY = 2  # STUB in Layer 1 (always 0.0); Layer 3 populates it
 
 #: Levels outside the operational band read as "confidently, a fast wind
 #: straight away from the goal", mirroring Loon's (1, 1, 0) encoding.
 LIMIT_TRIPLE = (1.0, 1.0, 0.0)
 
-AMBIENT_START = WIND_COL_WIDTH                            # 123
+AMBIENT_START = WIND_COL_WIDTH  # 123
 AMBIENT_FIELDS: Tuple[str, ...] = (
-    "alt_norm",           # 123
-    "goal_dz_norm",       # 124
-    "pressure_norm",      # 125
-    "vel_z_norm",         # 126
-    "dist_norm",          # 127
-    "heading_sin",        # 128
-    "heading_cos",        # 129
-    "resource_a",         # 130
-    "resource_b",         # 131
-    "volume_norm",        # 132
-    "last_action_down",   # 133
-    "last_action_stay",   # 134
-    "last_action_up",     # 135
-    "at_alt_min",         # 136
-    "at_alt_max",         # 137
-    "resource_a_low",     # 138
-    "resource_b_low",     # 139
-    "solar_elevation",    # 140  STUB (Layer 2)
-    "solar_phase_sin",    # 141  STUB (Layer 2)
-    "solar_phase_cos",    # 142  STUB (Layer 2)
+    "alt_norm",  # 123
+    "goal_dz_norm",  # 124
+    "pressure_norm",  # 125
+    "vel_z_norm",  # 126
+    "dist_norm",  # 127
+    "heading_sin",  # 128
+    "heading_cos",  # 129
+    "resource_a",  # 130
+    "resource_b",  # 131
+    "volume_norm",  # 132
+    "last_action_down",  # 133
+    "last_action_stay",  # 134
+    "last_action_up",  # 135
+    "at_alt_min",  # 136
+    "at_alt_max",  # 137
+    "resource_a_low",  # 138
+    "resource_b_low",  # 139
+    "solar_elevation",  # 140  STUB (Layer 2)
+    "solar_phase_sin",  # 141  STUB (Layer 2)
+    "solar_phase_cos",  # 142  STUB (Layer 2)
 )
 AMBIENT_IDX: Dict[str, int] = {
     name: AMBIENT_START + i for i, name in enumerate(AMBIENT_FIELDS)
@@ -196,7 +227,9 @@ IDX_SOLAR_ELEVATION = AMBIENT_IDX["solar_elevation"]
 IDX_SOLAR_PHASE_SIN = AMBIENT_IDX["solar_phase_sin"]
 IDX_SOLAR_PHASE_COS = AMBIENT_IDX["solar_phase_cos"]
 
-assert AMBIENT_START + len(AMBIENT_FIELDS) == OBS_WIDTH, "observation layout drifted from OBS_WIDTH"
+assert (
+    AMBIENT_START + len(AMBIENT_FIELDS) == OBS_WIDTH
+), "observation layout drifted from OBS_WIDTH"
 
 #: Layer 2 replaces these with a live diurnal model; Layer 1 is daytime-only.
 SOLAR_ELEVATION_STUB = 0.7
@@ -224,8 +257,9 @@ ACTION_UP = 2
 
 
 @_njit(cache=True, fastmath=True)
-def _write_wind_column(col, out, z, spacing, goal_dir, has_bearing,
-                       alt_min, alt_max, inv_mag_norm):
+def _write_wind_column(
+    col, out, z, spacing, goal_dir, has_bearing, alt_min, alt_max, inv_mag_norm
+):
     """Write the (mag, bearing) channels of the wind column into ``out``.
 
     One kernel rather than a chain of numpy ufuncs: this runs on *every*
@@ -286,9 +320,10 @@ class Actions(Enum):
     ZP actions are irreversible (finite resource budget).
     SP actions are reversible (air pumped in can be pumped out again).
     """
-    drop_ballast = 1   # ZP: drop sand ballast;  SP: pump air out
+
+    drop_ballast = 1  # ZP: drop sand ballast;  SP: pump air out
     nothing = 0
-    vent = -1          # ZP: vent helium;         SP: pump air in
+    vent = -1  # ZP: vent helium;         SP: pump air in
 
 
 class Balloon3DEnv(gym.Env):
@@ -298,35 +333,37 @@ class Balloon3DEnv(gym.Env):
 
     # sensible defaults – override by *config*
     DEFAULTS: Dict[str, Any] = dict(
-        dim=3,                    # 1, 2 or 3 dimensions
-        time_max=TIME_MAX,        # physics steps per episode (12 hours at DT=1s)
+        dim=3,  # 1, 2 or 3 dimensions
+        time_max=TIME_MAX,  # physics steps per episode (12 hours at DT=1s)
         decision_interval=DECISION_INTERVAL,  # physics steps one agent decision covers
         x_range=(-XY_MAX, XY_MAX),
         y_range=(-XY_MAX, XY_MAX),
         z_range=(0.0, ALT_MAX),
-        wind_mag=5.0,            # nominal wind speed [m/s] (randomised per episode)
-        wind_cells=20,           # horizontal (x, y) wind-grid resolution
-        wind_cells_z=None,       # vertical wind-grid resolution; None -> Nyquist for WIND_COL_SPACING
-        vent_rate_moles=None,     # reserved — vent rate now fixed in constants.py (VENT_RATE_MOLES)
+        wind_mag=5.0,  # nominal wind speed [m/s] (randomised per episode)
+        wind_cells=20,  # horizontal (x, y) wind-grid resolution
+        wind_cells_z=None,  # vertical wind-grid resolution; None -> Nyquist for WIND_COL_SPACING
+        vent_rate_moles=None,  # reserved — vent rate now fixed in constants.py (VENT_RATE_MOLES)
         window_size=(800, 600),  # pygame window (w,h)
-        wind_pattern="split_fork",      # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
-        wind_layers=2,                # number of full wind rotations over altitude range (altitude_shear_2d only)
+        wind_pattern="split_fork",  # wind pattern: "sinusoid", "linear_right", "linear_up", "split_fork", "altitude_shear", "altitude_shear_2d"
+        wind_layers=2,  # number of full wind rotations over altitude range (altitude_shear_2d only)
         balloon_type="zero_pressure",  # "zero_pressure" (ZP + sand ballast) or "superpressure" (SP + air ballast)
         # --- scenario randomisation (roadmap §3.9) -----------------------
-        randomise_scenario=True,      # draw a fresh scenario from np_random on reset
-        wind_mag_range=None,          # (lo, hi) m/s; None -> (0.5x, 1.5x) the field's nominal
+        randomise_scenario=True,  # draw a fresh scenario from np_random on reset
+        wind_mag_range=None,  # (lo, hi) m/s; None -> (0.5x, 1.5x) the field's nominal
         wind_layers_range=(1.0, 3.0),  # rotations over z_range, altitude_shear_2d only
-        goal_radius=15_000.0,         # goal drawn uniformly in a disc of this radius
-        spawn_dist_range=(2_000.0, 30_000.0),   # horizontal spawn offset from the goal
+        goal_radius=15_000.0,  # goal drawn uniformly in a disc of this radius
+        spawn_dist_range=(2_000.0, 30_000.0),  # horizontal spawn offset from the goal
         spawn_alt_range=(ALT_SAFE_MIN + 1_000.0, ALT_SAFE_MAX - 1_000.0),
         goal_alt_range=(ALT_SAFE_MIN + 1_000.0, ALT_SAFE_MAX - 1_000.0),  # 1D only
     )
 
-    def __init__(self,
-                 dim: Literal[1, 2, 3] = 3,
-                 render_mode: str | None = None,
-                 *,
-                 config: Dict[str, Any] | None = None):
+    def __init__(
+        self,
+        dim: Literal[1, 2, 3] = 3,
+        render_mode: str | None = None,
+        *,
+        config: Dict[str, Any] | None = None,
+    ):
         # merge defaults with overrides
         cfg = {**self.DEFAULTS, **(config or {}), "dim": dim}
         self.cfg = cfg
@@ -337,12 +374,17 @@ class Balloon3DEnv(gym.Env):
         # altitude and is bounded by the safety band, so it needs its own (much
         # tighter) scales — see constants.py.  Overridable via config.
         _one_d = self.dim == 1
-        self._station_radius: float = float(cfg.get(
-            "station_radius", STATION_RADIUS_1D if _one_d else STATION_RADIUS))
-        self._reward_halflife: float = float(cfg.get(
-            "reward_halflife", REWARD_HALFLIFE_1D if _one_d else REWARD_HALFLIFE))
-        self._inv_dist_norm: float = 1.0 / float(cfg.get(
-            "dist_norm", DIST_NORM_1D if _one_d else DIST_NORM))
+        self._station_radius: float = float(
+            cfg.get("station_radius", STATION_RADIUS_1D if _one_d else STATION_RADIUS)
+        )
+        self._reward_halflife: float = float(
+            cfg.get(
+                "reward_halflife", REWARD_HALFLIFE_1D if _one_d else REWARD_HALFLIFE
+            )
+        )
+        self._inv_dist_norm: float = 1.0 / float(
+            cfg.get("dist_norm", DIST_NORM_1D if _one_d else DIST_NORM)
+        )
         self.wind_cfg_path = "environments/winds.json"
 
         assert self.dim in (1, 2, 3), f"dim must be 1, 2 or 3. Got {self.dim}."
@@ -364,22 +406,34 @@ class Balloon3DEnv(gym.Env):
         # dim=1 uses z only, dim=2 uses x,y, dim=3 uses x,y,z
         if self.dim == 1:
             self._norm_offsets = np.array([self.z_range[0]], dtype=np.float32)
-            self._norm_scales = np.array([1.0 / (self.z_range[1] - self.z_range[0])], dtype=np.float32)
+            self._norm_scales = np.array(
+                [1.0 / (self.z_range[1] - self.z_range[0])], dtype=np.float32
+            )
             self._ranges = [self.z_range]
         elif self.dim == 2:
-            self._norm_offsets = np.array([self.x_range[0], self.y_range[0]], dtype=np.float32)
-            self._norm_scales = np.array([
-                1.0 / (self.x_range[1] - self.x_range[0]),
-                1.0 / (self.y_range[1] - self.y_range[0])
-            ], dtype=np.float32)
+            self._norm_offsets = np.array(
+                [self.x_range[0], self.y_range[0]], dtype=np.float32
+            )
+            self._norm_scales = np.array(
+                [
+                    1.0 / (self.x_range[1] - self.x_range[0]),
+                    1.0 / (self.y_range[1] - self.y_range[0]),
+                ],
+                dtype=np.float32,
+            )
             self._ranges = [self.x_range, self.y_range]
         else:  # dim == 3
-            self._norm_offsets = np.array([self.x_range[0], self.y_range[0], self.z_range[0]], dtype=np.float32)
-            self._norm_scales = np.array([
-                1.0 / (self.x_range[1] - self.x_range[0]),
-                1.0 / (self.y_range[1] - self.y_range[0]),
-                1.0 / (self.z_range[1] - self.z_range[0])
-            ], dtype=np.float32)
+            self._norm_offsets = np.array(
+                [self.x_range[0], self.y_range[0], self.z_range[0]], dtype=np.float32
+            )
+            self._norm_scales = np.array(
+                [
+                    1.0 / (self.x_range[1] - self.x_range[0]),
+                    1.0 / (self.y_range[1] - self.y_range[0]),
+                    1.0 / (self.z_range[1] - self.z_range[0]),
+                ],
+                dtype=np.float32,
+            )
             self._ranges = [self.x_range, self.y_range, self.z_range]
 
         # ------------------------------------------------------------------
@@ -419,7 +473,9 @@ class Balloon3DEnv(gym.Env):
         # Spaces
         # ------------------------------------------------------------------
         obs_low, obs_high = self._build_observation_bounds()
-        self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=obs_low, high=obs_high, dtype=np.float32
+        )
         self._obs_size = self.observation_space.shape[0]
         self._obs_buf = np.zeros(self._obs_size, dtype=np.float32)
         # Channels that never change in Layer 1 are written once, here.
@@ -428,8 +484,12 @@ class Balloon3DEnv(gym.Env):
         self._obs_buf[IDX_SOLAR_PHASE_SIN] = SOLAR_PHASE_SIN_STUB
         self._obs_buf[IDX_SOLAR_PHASE_COS] = SOLAR_PHASE_COS_STUB
 
-        self.action_space = spaces.Discrete(3)      # vent, nothing, drop ballast. Creates idx values 0,1,2
-        self._action_lut = np.array([-1, 0, 1])     # map action index to effect (0->vent, 1->nothing, 2->drop ballast)
+        self.action_space = spaces.Discrete(
+            3
+        )  # vent, nothing, drop ballast. Creates idx values 0,1,2
+        self._action_lut = np.array(
+            [-1, 0, 1]
+        )  # map action index to effect (0->vent, 1->nothing, 2->drop ballast)
 
         # ------------------------------------------------------------------
         # Runtime state containers
@@ -439,7 +499,9 @@ class Balloon3DEnv(gym.Env):
         self.goal: np.ndarray | None = None
         self._time: int = 0
         self.last_wind = np.zeros(3, dtype=np.float32)
-        self._wind_vel_buf = np.zeros(3, dtype=np.float64)  # reusable wind velocity for physics
+        self._wind_vel_buf = np.zeros(
+            3, dtype=np.float64
+        )  # reusable wind velocity for physics
         self.last_pressure_norm = 0.0
         self._init_n_gas = 1.0
         self.prev_action = ACTION_STAY
@@ -464,7 +526,7 @@ class Balloon3DEnv(gym.Env):
         self.window: pygame.Surface | None = None
         self.clock: pygame.time.Clock | None = None
         self.window_w, self.window_h = cfg["window_size"]
-        self.renderer: PygameRenderer | None = None   # Create renderer lazily
+        self.renderer: PygameRenderer | None = None  # Create renderer lazily
 
     # ------------------------------------------------------------------
     # Observation helpers
@@ -482,8 +544,14 @@ class Balloon3DEnv(gym.Env):
         # wind column: mag [0,1], bearing [-1,1], uncertainty [0,1]
         low[CH_BEARING:WIND_COL_WIDTH:WIND_COL_CHANNELS] = -1.0
 
-        for name in ("goal_dz_norm", "vel_z_norm", "heading_sin", "heading_cos",
-                     "solar_phase_sin", "solar_phase_cos"):
+        for name in (
+            "goal_dz_norm",
+            "vel_z_norm",
+            "heading_sin",
+            "heading_cos",
+            "solar_phase_sin",
+            "solar_phase_cos",
+        ):
             low[AMBIENT_IDX[name]] = -1.0
 
         return low, high
@@ -512,10 +580,17 @@ class Balloon3DEnv(gym.Env):
         rotation-invariant: "would this level carry me toward the station" is
         the same question at every compass heading.
         """
-        col = self.wind.sample_column(x, y, z)   # (levels, 2) — reused buffer
+        col = self.wind.sample_column(x, y, z)  # (levels, 2) — reused buffer
         _write_wind_column(
-            col, self._obs_buf, z, WIND_COL_SPACING, goal_dir, self.dim != 1,
-            ALT_SAFE_MIN, ALT_SAFE_MAX, _INV_WIND_MAG_NORM,
+            col,
+            self._obs_buf,
+            z,
+            WIND_COL_SPACING,
+            goal_dir,
+            self.dim != 1,
+            ALT_SAFE_MIN,
+            ALT_SAFE_MAX,
+            _INV_WIND_MAG_NORM,
         )
 
     def _get_obs(self) -> np.ndarray:
@@ -547,8 +622,12 @@ class Balloon3DEnv(gym.Env):
 
         # --- ambient scalars ----------------------------------------------
         alt_norm = (z - ALT_SAFE_MIN) * _INV_ALT_SAFE_SPAN
-        buf[IDX_ALT_NORM] = 0.0 if alt_norm < 0.0 else (1.0 if alt_norm > 1.0 else alt_norm)
-        buf[IDX_GOAL_DZ_NORM] = -1.0 if goal_dz < -1.0 else (1.0 if goal_dz > 1.0 else goal_dz)
+        buf[IDX_ALT_NORM] = (
+            0.0 if alt_norm < 0.0 else (1.0 if alt_norm > 1.0 else alt_norm)
+        )
+        buf[IDX_GOAL_DZ_NORM] = (
+            -1.0 if goal_dz < -1.0 else (1.0 if goal_dz > 1.0 else goal_dz)
+        )
 
         pressure_norm = float(self._atmosphere.pressure(z)) / P_MAX
         self.last_pressure_norm = pressure_norm
@@ -587,7 +666,9 @@ class Balloon3DEnv(gym.Env):
     # ------------------------------------------------------------------
     def _normalise_position(self, pos: np.ndarray) -> np.ndarray:
         """Normalise position to [0,1] using pre-computed offsets and scales."""
-        return ((pos[:self.dim] - self._norm_offsets) * self._norm_scales).astype(np.float32)
+        return ((pos[: self.dim] - self._norm_offsets) * self._norm_scales).astype(
+            np.float32
+        )
 
     def _full_coords(self, pos: np.ndarray) -> Tuple[float, float, float]:
         """Return (x,y,z) regardless of *dim*, padding with zeros as needed."""
@@ -659,7 +740,9 @@ class Balloon3DEnv(gym.Env):
                         break
                     spawn_z = float(rng.uniform(alt_lo, alt_hi))
                 else:  # pragma: no cover - only if the ranges are pathological
-                    spawn_z = float(np.clip(goal_z + 2.0 * MIN_START_DISTANCE, alt_lo, alt_hi))
+                    spawn_z = float(
+                        np.clip(goal_z + 2.0 * MIN_START_DISTANCE, alt_lo, alt_hi)
+                    )
             else:
                 goal_z = 0.5 * (goal_lo + goal_hi)
                 spawn_z = ALT_DEFAULT
@@ -669,7 +752,9 @@ class Balloon3DEnv(gym.Env):
             if randomise:
                 # Uniform over the *area* of the disc, not over the radius —
                 # otherwise the goal clusters at the centre.
-                goal_r = math.sqrt(float(rng.uniform(0.0, 1.0))) * float(cfg["goal_radius"])
+                goal_r = math.sqrt(float(rng.uniform(0.0, 1.0))) * float(
+                    cfg["goal_radius"]
+                )
                 goal_th = float(rng.uniform(0.0, _TWO_PI))
                 gx, gy = goal_r * math.cos(goal_th), goal_r * math.sin(goal_th)
                 # Spawn on a ring around the goal: guarantees the minimum start
@@ -734,11 +819,12 @@ class Balloon3DEnv(gym.Env):
         init_pos = np.append(pos0, self.z0) if self.dim == 2 else pos0
 
         if self._balloon_type == "superpressure":
-            self._balloon = BalloonSP(dim=real_dim,
-                                      atmosphere=self._atmosphere,
-                                      position=init_pos,
-                                      velocity=[0.0] * real_dim,
-                                      )
+            self._balloon = BalloonSP(
+                dim=real_dim,
+                atmosphere=self._atmosphere,
+                position=init_pos,
+                velocity=[0.0] * real_dim,
+            )
             self._init_n_gas = 1.0  # unused for SP; set to avoid AttributeError
 
             # --- SP domain randomisation ---
@@ -749,16 +835,22 @@ class Balloon3DEnv(gym.Env):
             self._balloon.vel[:] = init_vel
 
             # 2. Bladder perturbation (±INIT_GAS_FRAC_RANGE × AIR_BLADDER_MAX around midpoint)
-            bladder_delta = self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE) * AIR_BLADDER_MAX
+            bladder_delta = (
+                self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE)
+                * AIR_BLADDER_MAX
+            )
             self._balloon.air_bladder_mass = float(
-                np.clip(self._balloon.air_bladder_mass + bladder_delta, 0.0, AIR_BLADDER_MAX)
+                np.clip(
+                    self._balloon.air_bladder_mass + bladder_delta, 0.0, AIR_BLADDER_MAX
+                )
             )
         else:
-            self._balloon = Balloon(dim=real_dim,
-                                    atmosphere=self._atmosphere,
-                                    position=init_pos,
-                                    velocity=[0.0] * real_dim,
-                                    )
+            self._balloon = Balloon(
+                dim=real_dim,
+                atmosphere=self._atmosphere,
+                position=init_pos,
+                velocity=[0.0] * real_dim,
+            )
 
             # Store neutral-buoyancy gas amount for normalising the gas observation
             self._init_n_gas = self._balloon.n_gas
@@ -774,11 +866,13 @@ class Balloon3DEnv(gym.Env):
 
             # 2. Gas imbalance (±INIT_GAS_FRAC_RANGE of neutral amount)
             gas_frac = self.np_random.uniform(-INIT_GAS_FRAC_RANGE, INIT_GAS_FRAC_RANGE)
-            self._balloon.n_gas *= (1.0 + gas_frac)
+            self._balloon.n_gas *= 1.0 + gas_frac
 
             # 3. Ballast variation (some ballast may have been spent during ascent)
             ballast_loss = self.np_random.uniform(0.0, INIT_BALLAST_LOSS_MAX)
-            self._balloon.ballast_mass = max(0.0, self._balloon.ballast_mass - ballast_loss)
+            self._balloon.ballast_mass = max(
+                0.0, self._balloon.ballast_mass - ballast_loss
+            )
 
         self._prev_distance = l2_distance(self._balloon.pos, self.goal, self.dim)
         self.last_wind[:] = 0.0
@@ -795,12 +889,18 @@ class Balloon3DEnv(gym.Env):
         if not _JIT_WARMED:
             try:
                 from environments.core.jit_kernels import (
-                    pressure_numba, density_numba, temperature_numba,
+                    pressure_numba,
+                    density_numba,
+                    temperature_numba,
                     gas_temperature_numba,
-                    wind_sample_idx_numba, wind_sample_column_numba,
+                    wind_sample_idx_numba,
+                    wind_sample_column_numba,
                     physics_step_numba,
-                    sphere_area_from_volume, morrison_cd, dynamic_viscosity_numba,
+                    sphere_area_from_volume,
+                    morrison_cd,
+                    dynamic_viscosity_numba,
                 )
+
                 # warm-up calls with small dummy inputs (compile once)
                 _ = temperature_numba(1000.0)
                 _ = gas_temperature_numba(1000.0)
@@ -811,21 +911,61 @@ class Balloon3DEnv(gym.Env):
                 _ = morrison_cd(1000.0)
                 # wind warmup
                 wf = self.wind
-                _ = wind_sample_idx_numba(wf.x_centers[0], wf.y_centers[0], wf.z_centers[0],
-                                        wf.x_range[0], wf.inv_dx, wf.y_range[0], wf.inv_dy, wf.z_range[0], wf.inv_dz,
-                                        wf.cells, wf.cells_z, wf._fx_grid, wf._fy_grid)
-                wind_sample_column_numba(0.0, 0.0, 20000.0, WIND_COL_SPACING,
-                                         wf.x_range[0], wf.x_range[1], wf.inv_dx,
-                                         wf.y_range[0], wf.y_range[1], wf.inv_dy,
-                                         wf.z_range[0], wf.z_range[1], wf.inv_dz,
-                                         wf.cells, wf.cells_z, wf._fx_grid, wf._fy_grid,
-                                         np.zeros((WIND_COL_LEVELS, 2)))
+                _ = wind_sample_idx_numba(
+                    wf.x_centers[0],
+                    wf.y_centers[0],
+                    wf.z_centers[0],
+                    wf.x_range[0],
+                    wf.inv_dx,
+                    wf.y_range[0],
+                    wf.inv_dy,
+                    wf.z_range[0],
+                    wf.inv_dz,
+                    wf.cells,
+                    wf.cells_z,
+                    wf._fx_grid,
+                    wf._fy_grid,
+                )
+                wind_sample_column_numba(
+                    0.0,
+                    0.0,
+                    20000.0,
+                    WIND_COL_SPACING,
+                    wf.x_range[0],
+                    wf.x_range[1],
+                    wf.inv_dx,
+                    wf.y_range[0],
+                    wf.y_range[1],
+                    wf.inv_dy,
+                    wf.z_range[0],
+                    wf.z_range[1],
+                    wf.inv_dz,
+                    wf.cells,
+                    wf.cells_z,
+                    wf._fx_grid,
+                    wf._fy_grid,
+                    np.zeros((WIND_COL_LEVELS, 2)),
+                )
                 # physics warmup (dim-aware)
                 pos = self._balloon.pos.astype(np.float64, copy=True)
                 vel = self._balloon.vel.astype(np.float64, copy=True)
                 wv = np.zeros_like(pos)
                 ext = np.zeros_like(pos)
-                physics_step_numba(pos, vel, DT, self._balloon.mass, G, RHO_0, self._balloon.volume, wv, ext, self.dim, VEL_MAX, P0, M_AIR)
+                physics_step_numba(
+                    pos,
+                    vel,
+                    DT,
+                    self._balloon.mass,
+                    G,
+                    RHO_0,
+                    self._balloon.volume,
+                    wv,
+                    ext,
+                    self.dim,
+                    VEL_MAX,
+                    P0,
+                    M_AIR,
+                )
             except Exception:
                 pass  # if numba missing or compilation deferred, no problem
             _JIT_WARMED = True
@@ -850,7 +990,11 @@ class Balloon3DEnv(gym.Env):
         fire, it must not own what they cost.
         """
         if consumed_frac > 0.0:
-            self._omega = max(self._omega, consumed_frac) if self._omega_steps > 0 else consumed_frac
+            self._omega = (
+                max(self._omega, consumed_frac)
+                if self._omega_steps > 0
+                else consumed_frac
+            )
             self._omega_steps = self._decision_interval
 
         if self._omega_steps <= 0:
@@ -874,18 +1018,18 @@ class Balloon3DEnv(gym.Env):
 
         if self._balloon_type == "superpressure":
             before = b.air_bladder_mass
-            if effect == 1:      # pump air out → lighter → ascend
+            if effect == 1:  # pump air out → lighter → ascend
                 b.pump_out()
-            else:                # pump air in  → heavier → descend
+            else:  # pump air in  → heavier → descend
                 b.pump_in()
             return abs(b.air_bladder_mass - before) / AIR_BLADDER_MAX
 
-        if effect == 1:          # drop ballast → ascend
+        if effect == 1:  # drop ballast → ascend
             before = b.ballast_mass
             b.drop_ballast(BALLAST_DROP)
             return max(0.0, before - b.ballast_mass) / BALLAST_INITIAL
 
-        before = b.n_gas         # vent gas → descend
+        before = b.n_gas  # vent gas → descend
         b.vent_gas()
         return max(0.0, before - b.n_gas) / max(self._init_n_gas, _EPS)
 
@@ -900,7 +1044,7 @@ class Balloon3DEnv(gym.Env):
         omega = self._charge_resources(self._actuate(effect))
 
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
-        self.last_wind[:] = wind    # Cache for obs (copies before buffer reuse)
+        self.last_wind[:] = wind  # Cache for obs (copies before buffer reuse)
 
         # Build wind velocity vector for relative-velocity drag
         if self.dim == 1:
@@ -920,7 +1064,7 @@ class Balloon3DEnv(gym.Env):
         # update balloon physics (wind passed as velocity, not force)
         self._balloon.update(DT, wind_vel=wind_vel)
 
-        if self.dim == 2:          # keep altitude fixed
+        if self.dim == 2:  # keep altitude fixed
             self._balloon.pos[2] = self.z0
             self._balloon.vel[2] = 0.0
 
@@ -942,8 +1086,10 @@ class Balloon3DEnv(gym.Env):
             # Soft horizontal bounds: no distance termination at all, so the
             # agent can discover that riding an unfavourable wind out and back
             # is worth it.  XY_ABORT only catches numerical runaway.
-            runaway = bool(abs(self._balloon.pos[0]) > XY_ABORT
-                           or abs(self._balloon.pos[1]) > XY_ABORT)
+            runaway = bool(
+                abs(self._balloon.pos[0]) > XY_ABORT
+                or abs(self._balloon.pos[1]) > XY_ABORT
+            )
         terminated = bool(deflated or ballast_empty or runaway)
         self.truncated = self._time >= self.cfg["time_max"]
 
@@ -978,7 +1124,9 @@ class Balloon3DEnv(gym.Env):
             elif ballast_empty:
                 info["termination_reason"] = "Ballast exhausted (no ballast remaining)"
             elif runaway:
-                info["termination_reason"] = "Numerical abort (|x| or |y| beyond XY_ABORT)"
+                info["termination_reason"] = (
+                    "Numerical abort (|x| or |y| beyond XY_ABORT)"
+                )
 
         if self.render_mode == "human":
             self._ensure_renderer()
@@ -1015,7 +1163,9 @@ class Balloon3DEnv(gym.Env):
         if self.dim == 1:
             goal = np.array([0.0, 0.0, float(self.goal[0])], dtype=np.float64)
         elif self.dim == 2:
-            goal = np.array([float(self.goal[0]), float(self.goal[1]), self.z0], dtype=np.float64)
+            goal = np.array(
+                [float(self.goal[0]), float(self.goal[1]), self.z0], dtype=np.float64
+            )
         else:
             goal = self.goal.copy()
         return dict(

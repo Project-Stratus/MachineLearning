@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 
 from environments.core.wind_field import WindField, default_cells_z, CELLS_Z_MAX
-from environments.core.constants import WIND_COL_LEVELS, WIND_COL_SPACING, WIND_COL_HALF_SPAN
+from environments.core.constants import (
+    WIND_COL_LEVELS,
+    WIND_COL_SPACING,
+    WIND_COL_HALF_SPAN,
+)
 
 
 class TestWindFieldInitialization:
@@ -155,7 +159,7 @@ class TestVerticalResolution:
             pattern="altitude_shear_2d",
             default_mag=10.0,
         )
-        total_mib = (wf._fx_grid.nbytes + wf._fy_grid.nbytes) / 1024 ** 2
+        total_mib = (wf._fx_grid.nbytes + wf._fy_grid.nbytes) / 1024**2
         assert total_mib < 4.0
 
 
@@ -192,11 +196,13 @@ class TestWindFieldSampling:
 
     def test_sample_outside_bounds_clamped(self, wind_field):
         """Sampling outside bounds should be clamped to edge values."""
-        # Way outside bounds
-        wind_outside = wind_field.sample(10000.0, 10000.0, 50000.0)
+        # Way outside bounds. sample() returns a reused internal buffer, so
+        # copy the first result before the second call overwrites it.
+        wind_outside = wind_field.sample(10000.0, 10000.0, 50000.0).copy()
         wind_edge = wind_field.sample(2000.0, 2000.0, 30000.0)
 
         # Should be clamped to same value
+        assert np.array_equal(wind_outside, wind_edge)
         assert wind_outside.shape == (3,)
         assert np.all(np.isfinite(wind_outside))
 
@@ -213,8 +219,12 @@ class TestWindFieldSampling:
         """
         import environments.core.wind_field as wf_mod
 
-        points = [(0.0, 0.0, 15_000.0), (-1_337.0, 812.0, 2_500.0),
-                  (1_900.0, -1_900.0, 29_500.0), (17.0, -23.0, 137.0)]
+        points = [
+            (0.0, 0.0, 15_000.0),
+            (-1_337.0, 812.0, 2_500.0),
+            (1_900.0, -1_900.0, 29_500.0),
+            (17.0, -23.0, 137.0),
+        ]
         jit_vals = [wind_field.sample(*p).copy() for p in points]
         monkeypatch.setattr(wf_mod, "_JIT_OK", False)
         for p, expected in zip(points, jit_vals):

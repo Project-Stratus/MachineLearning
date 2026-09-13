@@ -78,8 +78,7 @@ class TestWrapperBasics:
         assert obs2.shape == obs.shape
         assert wrapped_1d.observation_space.contains(obs2)
         assert "distance" in info
-        assert info["distance"] == pytest.approx(
-            wrapped_1d.unwrapped._prev_distance)
+        assert info["distance"] == pytest.approx(wrapped_1d.unwrapped._prev_distance)
 
     def test_distance_present_on_every_decision(self, wrapped_1d):
         wrapped_1d.reset(seed=1)
@@ -93,7 +92,7 @@ class TestWrapperBasics:
         env = DecisionIntervalWrapper(make_env(1, time_max=6_000))
         try:
             env.reset(seed=1)
-            env.unwrapped._balloon.n_gas = 0.0     # instantly "deflated"
+            env.unwrapped._balloon.n_gas = 0.0  # instantly "deflated"
             _, reward, terminated, _, info = env.step(1)
             assert terminated
             assert reward == 0.0, "the terminal sub-step forfeits the interval"
@@ -166,8 +165,8 @@ class TestResourcePenaltyIsNotDiluted:
         env = DecisionIntervalWrapper(make_env(1, time_max=6_000))
         try:
             env.reset(seed=5)
-            env.step(2)                       # actuating decision
-            _, _, _, _, info = env.step(1)    # the next one must be free
+            env.step(2)  # actuating decision
+            _, _, _, _, info = env.step(1)  # the next one must be free
             assert info["reward_components"]["resource_factor"] == 1.0
         finally:
             env.close()

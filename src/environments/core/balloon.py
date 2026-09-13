@@ -3,17 +3,36 @@ import numpy as np
 
 from environments.core.atmosphere import Atmosphere
 from environments.core.constants import (
-    G, R, VOL_MAX, VOL_MIN, VEL_MAX, M_HE,
-    PAYLOAD_MASS, BALLAST_INITIAL, BALLAST_DROP, VENT_RATE_MOLES,
-    ALT_DEFAULT, OSCILLATION_AMP, OSCILLATION_PERIOD, SPEED_EPS,
-    MU_REF, T_REF, S_SUTH,
-    SP_VOL_FIXED, SP_PAYLOAD_MASS, AIR_PUMP_RATE, AIR_BLADDER_MAX, AIR_BLADDER_INITIAL,
+    G,
+    R,
+    VOL_MAX,
+    VOL_MIN,
+    VEL_MAX,
+    M_HE,
+    PAYLOAD_MASS,
+    BALLAST_INITIAL,
+    BALLAST_DROP,
+    VENT_RATE_MOLES,
+    ALT_DEFAULT,
+    OSCILLATION_AMP,
+    OSCILLATION_PERIOD,
+    SPEED_EPS,
+    MU_REF,
+    T_REF,
+    S_SUTH,
+    SP_VOL_FIXED,
+    SP_PAYLOAD_MASS,
+    AIR_PUMP_RATE,
+    AIR_BLADDER_MAX,
+    AIR_BLADDER_INITIAL,
 )
 
 try:
     from environments.core.jit_kernels import (
-        physics_step_numba, density_numba, sphere_area_from_volume, morrison_cd,
+        physics_step_numba,
+        density_numba,
     )
+
     _JIT_OK = True
 except Exception:
     _JIT_OK = False
@@ -267,8 +286,9 @@ class Balloon:
         f[-1] = -self.mass * G
         return f
 
-    def drag_force(self, rho_air: float | None = None,
-                   wind_vel: np.ndarray | None = None) -> np.ndarray:
+    def drag_force(
+        self, rho_air: float | None = None, wind_vel: np.ndarray | None = None
+    ) -> np.ndarray:
         """Drag from relative velocity (v_balloon - v_wind)."""
         if wind_vel is None:
             wind_vel = self._zero_vec
@@ -291,8 +311,7 @@ class Balloon:
         f_mag = 0.5 * cd * area * rho_air * rel_speed**2
         return -f_mag * (v_rel / rel_speed)
 
-    def update(self, *args, wind_vel=None, external_force=None,
-               control_force=None):
+    def update(self, *args, wind_vel=None, external_force=None, control_force=None):
         """Advance the balloon state by one timestep.
 
         Parameters
@@ -326,28 +345,45 @@ class Balloon:
         # Merge external_force and legacy control_force into one vector
         ext = self._zero_vec
         if external_force is not None:
-            if not isinstance(external_force, np.ndarray) or external_force.dtype != np.float64:
+            if (
+                not isinstance(external_force, np.ndarray)
+                or external_force.dtype != np.float64
+            ):
                 external_force = np.asarray(external_force, dtype=np.float64)
             ext = external_force
         if control_force is not None:
-            if not isinstance(control_force, np.ndarray) or control_force.dtype != np.float64:
+            if (
+                not isinstance(control_force, np.ndarray)
+                or control_force.dtype != np.float64
+            ):
                 control_force = np.asarray(control_force, dtype=np.float64)
             ext = ext + control_force if ext is not self._zero_vec else control_force
 
         # Compute density at current altitude
         z = self.pos[-1]
         if _JIT_OK:
-            rho_air = float(density_numba(self.atmosphere.p0, self.atmosphere.molar_mass, z))
+            rho_air = float(
+                density_numba(self.atmosphere.p0, self.atmosphere.molar_mass, z)
+            )
         else:
             rho_air = self.atmosphere.density(z)
         vol = self.dynamic_volume(t)
 
         if _JIT_OK:
             physics_step_numba(
-                self.pos, self.vel, dt, self.mass, G,
-                rho_air, vol,
-                wind_vel, ext, int(self.dim), VEL_MAX,
-                self.atmosphere.p0, self.atmosphere.molar_mass,
+                self.pos,
+                self.vel,
+                dt,
+                self.mass,
+                G,
+                rho_air,
+                vol,
+                wind_vel,
+                ext,
+                int(self.dim),
+                VEL_MAX,
+                self.atmosphere.p0,
+                self.atmosphere.molar_mass,
             )
         else:
             self._verlet_step_py(dt, t, rho_air, vol, wind_vel, ext)
@@ -475,7 +511,12 @@ class BalloonSP(Balloon):
     def superpressure(self) -> float:
         """Internal-minus-ambient pressure (Pa) of the sealed helium envelope."""
         alt = self.pos[-1]
-        p_int = self.n_he_fixed * R * self.atmosphere.gas_temperature(alt) / self.volume_fixed
+        p_int = (
+            self.n_he_fixed
+            * R
+            * self.atmosphere.gas_temperature(alt)
+            / self.volume_fixed
+        )
         return p_int - self.atmosphere.pressure(alt)
 
     # -- Variable mass ---------------------------------------------------------
@@ -522,6 +563,7 @@ class BalloonSP(Balloon):
 
 # ---- Module-level helpers (pure Python, used by Balloon methods) ------------
 
+
 def _sphere_area(volume: float) -> float:
     r = (volume / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
     return _PI * r * r
@@ -533,5 +575,5 @@ def _morrison_cd(Re: float) -> float:
     term1 = 24.0 / Re
     term2 = 2.6 * (Re / 5.0) / (1.0 + (Re / 5.0) ** 1.52)
     term3 = 0.411 * (Re / 263000.0) ** (-7.94) / (1.0 + (Re / 263000.0) ** (-8.0))
-    term4 = Re ** 0.80 / 461000.0
+    term4 = Re**0.80 / 461000.0
     return term1 + term2 + term3 + term4

@@ -51,8 +51,12 @@ from tests.conftest import expected_obs_size, make_env
 
 #: Ambient scalars whose declared range is [-1, 1] rather than [0, 1].
 SIGNED_AMBIENT = (
-    "goal_dz_norm", "vel_z_norm", "heading_sin", "heading_cos",
-    "solar_phase_sin", "solar_phase_cos",
+    "goal_dz_norm",
+    "vel_z_norm",
+    "heading_sin",
+    "heading_cos",
+    "solar_phase_sin",
+    "solar_phase_cos",
 )
 
 
@@ -88,11 +92,26 @@ class TestLayoutIsFrozen:
 
     def test_ambient_field_order(self):
         assert AMBIENT_FIELDS == (
-            "alt_norm", "goal_dz_norm", "pressure_norm", "vel_z_norm", "dist_norm",
-            "heading_sin", "heading_cos", "resource_a", "resource_b", "volume_norm",
-            "last_action_down", "last_action_stay", "last_action_up",
-            "at_alt_min", "at_alt_max", "resource_a_low", "resource_b_low",
-            "solar_elevation", "solar_phase_sin", "solar_phase_cos",
+            "alt_norm",
+            "goal_dz_norm",
+            "pressure_norm",
+            "vel_z_norm",
+            "dist_norm",
+            "heading_sin",
+            "heading_cos",
+            "resource_a",
+            "resource_b",
+            "volume_norm",
+            "last_action_down",
+            "last_action_stay",
+            "last_action_up",
+            "at_alt_min",
+            "at_alt_max",
+            "resource_a_low",
+            "resource_b_low",
+            "solar_elevation",
+            "solar_phase_sin",
+            "solar_phase_cos",
         )
         assert AMBIENT_IDX["alt_norm"] == 123
         assert AMBIENT_IDX["solar_phase_cos"] == 142
@@ -108,12 +127,19 @@ class TestLayoutIsFrozen:
         assert bl.WIND_COL_WIDTH == WIND_COL_WIDTH
         assert bl.WIND_COL_CENTRE == WIND_COL_CENTRE
         assert bl.WIND_COL_CHANNELS == WIND_COL_CHANNELS
-        assert (bl.CH_MAG, bl.CH_BEARING, bl.CH_UNCERTAINTY) == (CH_MAG, CH_BEARING, CH_UNCERTAINTY)
+        assert (bl.CH_MAG, bl.CH_BEARING, bl.CH_UNCERTAINTY) == (
+            CH_MAG,
+            CH_BEARING,
+            CH_UNCERTAINTY,
+        )
         assert bl.LIMIT_TRIPLE == LIMIT_TRIPLE
         assert bl.AMBIENT_FIELDS == AMBIENT_FIELDS
         assert bl.AMBIENT_IDX == AMBIENT_IDX
         assert (bl.ACTION_DOWN, bl.ACTION_STAY, bl.ACTION_UP) == (
-            env_mod.ACTION_DOWN, env_mod.ACTION_STAY, env_mod.ACTION_UP)
+            env_mod.ACTION_DOWN,
+            env_mod.ACTION_STAY,
+            env_mod.ACTION_UP,
+        )
 
 
 class TestObservationSpaceBounds:
@@ -162,9 +188,9 @@ class TestObservationSpaceBounds:
             for _ in range(200):
                 obs, _, term, trunc, _ = env.step(int(rng.integers(3)))
                 assert np.all(np.isfinite(obs))
-                assert env.observation_space.contains(obs), (
-                    np.flatnonzero((obs < env.observation_space.low)
-                                   | (obs > env.observation_space.high))
+                assert env.observation_space.contains(obs), np.flatnonzero(
+                    (obs < env.observation_space.low)
+                    | (obs > env.observation_space.high)
                 )
                 if term or trunc:
                     break
@@ -211,7 +237,7 @@ class TestWindColumn:
 
     def test_levels_below_the_band_carry_the_limit_triple(self, env_3d):
         env_3d.reset(seed=11)
-        z = ALT_SAFE_MIN + 100.0        # levels 0..19 fall below the band
+        z = ALT_SAFE_MIN + 100.0  # levels 0..19 fall below the band
         env_3d._balloon.pos[:] = [0.0, 0.0, z]
         col = wind_column(env_3d._get_obs())
 
@@ -222,7 +248,7 @@ class TestWindColumn:
 
     def test_levels_above_the_band_carry_the_limit_triple(self, env_3d):
         env_3d.reset(seed=11)
-        z = ALT_SAFE_MAX - 100.0        # levels 21..40 rise above the band
+        z = ALT_SAFE_MAX - 100.0  # levels 21..40 rise above the band
         env_3d._balloon.pos[:] = [0.0, 0.0, z]
         col = wind_column(env_3d._get_obs())
 
@@ -267,7 +293,7 @@ class TestWindColumn:
         try:
             env.reset(seed=3)
             env._balloon.pos[:] = [0.0, 0.0, 20_000.0]
-            env.goal = np.array([10_000.0, 0.0, env.z0])   # goal due +x, wind due +x
+            env.goal = np.array([10_000.0, 0.0, env.z0])  # goal due +x, wind due +x
             col = wind_column(env._get_obs())
             assert col[WIND_COL_CENTRE, CH_BEARING] == pytest.approx(0.0, abs=1e-6)
         finally:
@@ -290,7 +316,7 @@ class TestWindColumn:
             env.reset(seed=3)
             env._balloon.pos[:] = [0.0, 0.0, 20_000.0]
 
-            env.goal = np.array([0.0, 10_000.0, env.z0])   # goal due +y
+            env.goal = np.array([0.0, 10_000.0, env.z0])  # goal due +y
             right = wind_column(env._get_obs())[WIND_COL_CENTRE, CH_BEARING]
             env.goal = np.array([0.0, -10_000.0, env.z0])  # goal due -y
             left = wind_column(env._get_obs())[WIND_COL_CENTRE, CH_BEARING]
@@ -305,7 +331,7 @@ class TestWindColumn:
         env_1d.reset(seed=5)
         for _ in range(5):
             col = wind_column(env_1d.step(1)[0])
-            assert np.all(col[bl.limit_mask(col) == False, CH_BEARING] == 0.0)  # noqa: E712
+            assert np.all(col[~bl.limit_mask(col), CH_BEARING] == 0.0)
 
 
 class TestAmbientFields:
@@ -339,14 +365,17 @@ class TestAmbientFields:
     def test_vel_z_norm_is_signed_and_clipped(self, env_3d):
         env_3d.reset(seed=2)
         env_3d._balloon.vel[2] = -0.5 * VEL_Z_OBS_NORM
-        assert env_3d._get_obs()[AMBIENT_IDX["vel_z_norm"]] == pytest.approx(-0.5, abs=1e-6)
+        assert env_3d._get_obs()[AMBIENT_IDX["vel_z_norm"]] == pytest.approx(
+            -0.5, abs=1e-6
+        )
         env_3d._balloon.vel[2] = 10.0 * VEL_Z_OBS_NORM
         assert env_3d._get_obs()[AMBIENT_IDX["vel_z_norm"]] == 1.0
 
     def test_dist_norm_matches_the_reward_distance(self, env_3d):
         obs, info = env_3d.reset(seed=2)
         assert obs[AMBIENT_IDX["dist_norm"]] == pytest.approx(
-            min(info["distance"] / DIST_NORM, 1.0), abs=1e-6)
+            min(info["distance"] / DIST_NORM, 1.0), abs=1e-6
+        )
 
     def test_dist_norm_saturates_rather_than_escaping_bounds(self, env_3d):
         env_3d.reset(seed=2)
@@ -356,7 +385,7 @@ class TestAmbientFields:
     def test_heading_sin_cos(self, env_3d):
         env_3d.reset(seed=2)
         env_3d._balloon.pos[:] = [0.0, 0.0, 20_000.0]
-        env_3d.goal = np.array([0.0, 5_000.0, env_3d.z0])   # due north
+        env_3d.goal = np.array([0.0, 5_000.0, env_3d.z0])  # due north
         obs = env_3d._get_obs()
         assert obs[AMBIENT_IDX["heading_sin"]] == pytest.approx(1.0, abs=1e-6)
         assert obs[AMBIENT_IDX["heading_cos"]] == pytest.approx(0.0, abs=1e-6)
@@ -370,9 +399,11 @@ class TestAmbientFields:
         env_1d.reset(seed=2)
         obs = env_1d._get_obs()
         assert obs[AMBIENT_IDX["resource_a"]] == pytest.approx(
-            min(env_1d._balloon.ballast_mass / BALLAST_INITIAL, 1.0), abs=1e-6)
+            min(env_1d._balloon.ballast_mass / BALLAST_INITIAL, 1.0), abs=1e-6
+        )
         assert obs[AMBIENT_IDX["resource_b"]] == pytest.approx(
-            min(env_1d._balloon.n_gas / env_1d._init_n_gas, 1.0), abs=1e-6)
+            min(env_1d._balloon.n_gas / env_1d._init_n_gas, 1.0), abs=1e-6
+        )
 
     def test_sp_resources_are_bladder_fill_and_headroom(self, env_sp_1d):
         env_sp_1d.reset(seed=2)
@@ -392,7 +423,8 @@ class TestAmbientFields:
         env_1d.reset(seed=2)
         obs = env_1d._get_obs()
         assert obs[AMBIENT_IDX["volume_norm"]] == pytest.approx(
-            env_1d._balloon.volume / VOL_MAX, abs=1e-6)
+            env_1d._balloon.volume / VOL_MAX, abs=1e-6
+        )
 
     def test_sp_volume_norm_is_the_fixed_fraction(self, env_sp_1d):
         env_sp_1d.reset(seed=2)
@@ -403,14 +435,21 @@ class TestAmbientFields:
             if term or trunc:
                 break
 
-    @pytest.mark.parametrize("action,field", [
-        (0, "last_action_down"), (1, "last_action_stay"), (2, "last_action_up"),
-    ])
+    @pytest.mark.parametrize(
+        "action,field",
+        [
+            (0, "last_action_down"),
+            (1, "last_action_stay"),
+            (2, "last_action_up"),
+        ],
+    )
     def test_last_action_one_hot(self, env_1d, action, field):
         env_1d.reset(seed=2)
         obs, _, _, _, _ = env_1d.step(action)
-        one_hot = [obs[AMBIENT_IDX[n]] for n in
-                   ("last_action_down", "last_action_stay", "last_action_up")]
+        one_hot = [
+            obs[AMBIENT_IDX[n]]
+            for n in ("last_action_down", "last_action_stay", "last_action_up")
+        ]
         assert sum(one_hot) == 1.0
         assert obs[AMBIENT_IDX[field]] == 1.0
 
@@ -467,7 +506,11 @@ class TestObservationConsistency:
             zp = make_env(dim)
             sp = make_env(dim, balloon_type="superpressure")
             try:
-                assert zp.reset(seed=1)[0].shape == sp.reset(seed=1)[0].shape == (OBS_WIDTH,)
+                assert (
+                    zp.reset(seed=1)[0].shape
+                    == sp.reset(seed=1)[0].shape
+                    == (OBS_WIDTH,)
+                )
                 assert zp.observation_space == sp.observation_space
             finally:
                 zp.close()
@@ -497,8 +540,12 @@ def test_observation_space_is_shared_by_gym_make():
     """gym.make must expose the same frozen space (no wrapper surprises)."""
     import gymnasium as gym
 
-    env = gym.make("environments/Balloon3D-v0", dim=3, disable_env_checker=True,
-                   config={"time_max": 10})
+    env = gym.make(
+        "environments/Balloon3D-v0",
+        dim=3,
+        disable_env_checker=True,
+        config={"time_max": 10},
+    )
     try:
         assert env.observation_space.shape == (OBS_WIDTH,)
         obs, _ = env.reset(seed=1)

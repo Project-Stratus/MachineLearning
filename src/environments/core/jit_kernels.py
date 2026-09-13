@@ -86,17 +86,26 @@ def morrison_cd(Re: float) -> float:
     term1 = 24.0 / Re
     term2 = 2.6 * (Re / 5.0) / (1.0 + (Re / 5.0) ** 1.52)
     term3 = 0.411 * (Re / 263000.0) ** (-7.94) / (1.0 + (Re / 263000.0) ** (-8.0))
-    term4 = Re ** 0.80 / 461000.0
+    term4 = Re**0.80 / 461000.0
     return term1 + term2 + term3 + term4
 
 
 @njit(cache=True, fastmath=True)
-def wind_sample_idx_numba(x: float, y: float, z: float,
-                          x0: float, inv_dx: float,
-                          y0: float, inv_dy: float,
-                          z0: float, inv_dz: float,
-                          cells_xy: int, cells_z: int,
-                          fx_grid: np.ndarray, fy_grid: np.ndarray) -> (float, float):
+def wind_sample_idx_numba(
+    x: float,
+    y: float,
+    z: float,
+    x0: float,
+    inv_dx: float,
+    y0: float,
+    inv_dy: float,
+    z0: float,
+    inv_dz: float,
+    cells_xy: int,
+    cells_z: int,
+    fx_grid: np.ndarray,
+    fy_grid: np.ndarray,
+) -> (float, float):
     """Nearest-cell lookup on the wind grid.
 
     The vertical axis carries its own cell count: the grid is deliberately
@@ -106,23 +115,42 @@ def wind_sample_idx_numba(x: float, y: float, z: float,
     ix = int((x - x0) * inv_dx)
     iy = int((y - y0) * inv_dy)
     iz = int((z - z0) * inv_dz)
-    if ix < 0: ix = 0
-    elif ix >= cells_xy: ix = cells_xy - 1
-    if iy < 0: iy = 0
-    elif iy >= cells_xy: iy = cells_xy - 1
-    if iz < 0: iz = 0
-    elif iz >= cells_z: iz = cells_z - 1
+    if ix < 0:
+        ix = 0
+    elif ix >= cells_xy:
+        ix = cells_xy - 1
+    if iy < 0:
+        iy = 0
+    elif iy >= cells_xy:
+        iy = cells_xy - 1
+    if iz < 0:
+        iz = 0
+    elif iz >= cells_z:
+        iz = cells_z - 1
     return fx_grid[ix, iy, iz], fy_grid[ix, iy, iz]
 
 
 @njit(cache=True, fastmath=True)
-def wind_sample_column_numba(x: float, y: float, z_center: float, spacing: float,
-                             x_lo: float, x_hi: float, inv_dx: float,
-                             y_lo: float, y_hi: float, inv_dy: float,
-                             z_lo: float, z_hi: float, inv_dz: float,
-                             cells_xy: int, cells_z: int,
-                             fx_grid: np.ndarray, fy_grid: np.ndarray,
-                             out: np.ndarray) -> None:
+def wind_sample_column_numba(
+    x: float,
+    y: float,
+    z_center: float,
+    spacing: float,
+    x_lo: float,
+    x_hi: float,
+    inv_dx: float,
+    y_lo: float,
+    y_hi: float,
+    inv_dy: float,
+    z_lo: float,
+    z_hi: float,
+    inv_dz: float,
+    cells_xy: int,
+    cells_z: int,
+    fx_grid: np.ndarray,
+    fy_grid: np.ndarray,
+    out: np.ndarray,
+) -> None:
     """Fill *out* (levels, 2) with (fx, fy) on a vertical column.
 
     Level ``i`` sits at ``z_center + (i - levels//2) * spacing``.  Sampling
@@ -174,9 +202,15 @@ def wind_sample_column_numba(x: float, y: float, z_center: float, spacing: float
 
 
 @njit(cache=True, fastmath=True)
-def _compute_drag(vel: np.ndarray, wind_vel: np.ndarray,
-                  rho_air: float, area: float, diameter: float,
-                  alt: float, n_dim: int) -> (float, float, float):
+def _compute_drag(
+    vel: np.ndarray,
+    wind_vel: np.ndarray,
+    rho_air: float,
+    area: float,
+    diameter: float,
+    alt: float,
+    n_dim: int,
+) -> (float, float, float):
     """
     Compute drag magnitude and relative-velocity direction.
 
@@ -206,18 +240,27 @@ def _compute_drag(vel: np.ndarray, wind_vel: np.ndarray,
 
 
 @njit(cache=True, fastmath=True)
-def _compute_accel(pos: np.ndarray, vel: np.ndarray,
-                   wind_vel: np.ndarray, external_force: np.ndarray,
-                   mass: float, G: float,
-                   rho_air: float, volume: float, area: float, diameter: float,
-                   n_dim: int,
-                   accel_out: np.ndarray) -> None:
+def _compute_accel(
+    pos: np.ndarray,
+    vel: np.ndarray,
+    wind_vel: np.ndarray,
+    external_force: np.ndarray,
+    mass: float,
+    G: float,
+    rho_air: float,
+    volume: float,
+    area: float,
+    diameter: float,
+    n_dim: int,
+    accel_out: np.ndarray,
+) -> None:
     """Compute per-axis acceleration into *accel_out* (pre-allocated)."""
     z_idx = n_dim - 1
     alt = pos[z_idx]
 
     f_mag, rel_speed, inv_rel_speed = _compute_drag(
-        vel, wind_vel, rho_air, area, diameter, alt, n_dim)
+        vel, wind_vel, rho_air, area, diameter, alt, n_dim
+    )
     have_rel = rel_speed > 1e-12
 
     buoy_z = rho_air * G * volume - mass * G
@@ -235,14 +278,21 @@ def _compute_accel(pos: np.ndarray, vel: np.ndarray,
 
 
 @njit(cache=True, fastmath=True)
-def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
-                       dt: float,
-                       mass: float,
-                       G: float,
-                       rho_air: float, volume: float,
-                       wind_vel: np.ndarray, external_force: np.ndarray,
-                       n_dim: int, vel_max: float,
-                       p0: float, M_air: float) -> None:
+def physics_step_numba(
+    pos: np.ndarray,
+    vel: np.ndarray,
+    dt: float,
+    mass: float,
+    G: float,
+    rho_air: float,
+    volume: float,
+    wind_vel: np.ndarray,
+    external_force: np.ndarray,
+    n_dim: int,
+    vel_max: float,
+    p0: float,
+    M_air: float,
+) -> None:
     """
     Velocity-Verlet integration for 1D/2D/3D.
 
@@ -265,8 +315,20 @@ def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
 
     # --- Step 1: acceleration at current state ---
     a_old = np.empty(n_dim, dtype=np.float64)
-    _compute_accel(pos, vel, wind_vel, external_force,
-                   mass, G, rho_air, volume, area, diameter, n_dim, a_old)
+    _compute_accel(
+        pos,
+        vel,
+        wind_vel,
+        external_force,
+        mass,
+        G,
+        rho_air,
+        volume,
+        area,
+        diameter,
+        n_dim,
+        a_old,
+    )
 
     # --- Step 2: update position ---
     half_dt2 = 0.5 * dt * dt
@@ -278,8 +340,20 @@ def physics_step_numba(pos: np.ndarray, vel: np.ndarray,
 
     # --- Step 4: acceleration at new position (with old velocity) ---
     a_new = np.empty(n_dim, dtype=np.float64)
-    _compute_accel(pos, vel, wind_vel, external_force,
-                   mass, G, rho_new, volume, area, diameter, n_dim, a_new)
+    _compute_accel(
+        pos,
+        vel,
+        wind_vel,
+        external_force,
+        mass,
+        G,
+        rho_new,
+        volume,
+        area,
+        diameter,
+        n_dim,
+        a_new,
+    )
 
     # --- Step 5: update velocity ---
     half_dt = 0.5 * dt

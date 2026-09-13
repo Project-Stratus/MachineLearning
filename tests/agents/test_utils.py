@@ -137,8 +137,7 @@ class TestInfoProgressBar:
     def test_info_progress_bar_initialization(self):
         """InfoProgressBar should initialize with description and postfix."""
         bar = InfoProgressBar(
-            description="Test Progress",
-            postfix={"gamma": 0.99, "lr": 0.001}
+            description="Test Progress", postfix={"gamma": 0.99, "lr": 0.001}
         )
         assert bar._description == "Test Progress"
         assert bar._postfix == {"gamma": 0.99, "lr": 0.001}
@@ -156,6 +155,7 @@ class TestInfoProgressBar:
     def test_info_progress_bar_inherits_from_progress_bar_callback(self):
         """InfoProgressBar should inherit from ProgressBarCallback."""
         from stable_baselines3.common.callbacks import ProgressBarCallback
+
         bar = InfoProgressBar(description="Test")
         assert isinstance(bar, ProgressBarCallback)
 
@@ -189,8 +189,9 @@ def _obs(altitudes) -> np.ndarray:
     return obs
 
 
-def _roll_toy_balloon(action_fn, n_steps: int = 600, rate: float = 50.0,
-                      alt0: float = 20_000.0):
+def _roll_toy_balloon(
+    action_fn, n_steps: int = 600, rate: float = 50.0, alt0: float = 20_000.0
+):
     """Drive a deliberately sluggish toy balloon and record what happened.
 
     ``rate`` metres per decision is the whole point of the exercise: one
@@ -202,7 +203,9 @@ def _roll_toy_balloon(action_fn, n_steps: int = 600, rate: float = 50.0,
     actions, altitudes = [], []
     for _ in range(n_steps):
         action = int(action_fn(_obs(alt)))
-        alt = float(np.clip(alt + (action - ACTION_STAY) * rate, ALT_SAFE_MIN, ALT_SAFE_MAX))
+        alt = float(
+            np.clip(alt + (action - ACTION_STAY) * rate, ALT_SAFE_MIN, ALT_SAFE_MAX)
+        )
         actions.append(action)
         altitudes.append(alt)
     return np.asarray(actions), np.asarray(altitudes)
@@ -225,8 +228,13 @@ class TestMomentumExplorerState:
 
     def test_targets_stay_inside_the_band_under_perturbation(self):
         # Tiny band + huge sigma: every perturbation would escape if unclipped.
-        ex = MomentumExplorer(alt_min=19_000.0, alt_max=21_000.0, perturb_every=1,
-                              perturb_sigma=50_000.0, seed=1)
+        ex = MomentumExplorer(
+            alt_min=19_000.0,
+            alt_max=21_000.0,
+            perturb_every=1,
+            perturb_sigma=50_000.0,
+            seed=1,
+        )
         for _ in range(200):
             ex.act(_obs([20_000.0, 20_000.0]))
             assert np.all(ex.target_alt >= 19_000.0)
@@ -235,12 +243,12 @@ class TestMomentumExplorerState:
     def test_target_is_held_then_perturbed(self):
         ex = MomentumExplorer(perturb_every=10, perturb_sigma=500.0, seed=2)
         ex.act(_obs([20_000.0]))
-        ex.reset_envs()                      # resets the countdown to perturb_every
+        ex.reset_envs()  # resets the countdown to perturb_every
         held = ex.target_alt.copy()
-        for _ in range(9):                   # 9 ticks: not yet due
+        for _ in range(9):  # 9 ticks: not yet due
             ex.act(_obs([20_000.0]))
             assert ex.target_alt == pytest.approx(held)
-        ex.act(_obs([20_000.0]))             # 10th tick: perturbation lands
+        ex.act(_obs([20_000.0]))  # 10th tick: perturbation lands
         assert ex.target_alt != pytest.approx(held)
 
     def test_per_env_targets_are_independent(self):
@@ -269,12 +277,15 @@ class TestMomentumExplorerState:
         b = MomentumExplorer(seed=7).act(_obs([20_000.0] * 4))
         np.testing.assert_array_equal(a, b)
 
-    @pytest.mark.parametrize("bad", [
-        dict(alt_min=20_000.0, alt_max=19_000.0),
-        dict(perturb_every=0),
-        dict(perturb_sigma=-1.0),
-        dict(deadband=-1.0),
-    ])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            dict(alt_min=20_000.0, alt_max=19_000.0),
+            dict(perturb_every=0),
+            dict(perturb_sigma=-1.0),
+            dict(deadband=-1.0),
+        ],
+    )
     def test_rejects_nonsense_config(self, bad):
         with pytest.raises(ValueError):
             MomentumExplorer(**bad)
@@ -337,7 +348,9 @@ class TestMomentumExplorationIsCorrelated:
         uniform_p = _persistence(uniform_actions)
 
         assert uniform_p == pytest.approx(1 / 3, abs=0.08), "uniform baseline drifted"
-        assert momentum_p > 0.9, f"momentum exploration is not persistent ({momentum_p:.3f})"
+        assert (
+            momentum_p > 0.9
+        ), f"momentum exploration is not persistent ({momentum_p:.3f})"
         assert momentum_p > 2.0 * uniform_p
 
     def test_persistence_produces_macroscopic_altitude_variation(self):
@@ -357,7 +370,9 @@ class TestMomentumExplorationIsCorrelated:
             uniform_span.append(np.ptp(uniform_alts))
 
         assert np.mean(momentum_span) > 2.0 * np.mean(uniform_span)
-        assert np.mean(momentum_span) > 2_500.0, "momentum exploration barely moved the balloon"
+        assert (
+            np.mean(momentum_span) > 2_500.0
+        ), "momentum exploration barely moved the balloon"
 
     def test_holds_a_direction_for_many_consecutive_decisions(self):
         actions, _ = self._momentum_stream()
@@ -380,17 +395,14 @@ class TestInfoProgressBarIntegration:
         """InfoProgressBar should work with actual (short) training."""
         pytest.importorskip("stable_baselines3")
 
-        import torch
         from sb3_contrib import QRDQN
-        from stable_baselines3.common.callbacks import CallbackList
         from environments.envs.balloon_3d_env import Balloon3DEnv
 
         device = "cpu"  # Force CPU for short test to avoid SB3 MLP-on-GPU warning
         env = Balloon3DEnv(dim=1, render_mode=None, config={"time_max": 10})
         try:
             callback = InfoProgressBar(
-                description="Test Training",
-                postfix={"test": True}
+                description="Test Training", postfix={"test": True}
             )
 
             model = QRDQN("MlpPolicy", env, verbose=0, learning_starts=0, device=device)

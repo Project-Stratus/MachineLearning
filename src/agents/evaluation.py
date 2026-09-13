@@ -224,8 +224,9 @@ def evaluate_policy_twr(
     # defaulting to the horizontal constant would score every 1-D run at TWR 1.0
     # while the return told a completely different story.
     if station_radius is None:
-        station_radius = float(getattr(
-            getattr(env, "unwrapped", env), "_station_radius", STATION_RADIUS))
+        station_radius = float(
+            getattr(getattr(env, "unwrapped", env), "_station_radius", STATION_RADIUS)
+        )
 
     episode_returns: list[float] = []
     episode_lengths: list[int] = []
@@ -263,7 +264,9 @@ def evaluate_policy_twr(
         episode_lengths.append(len(ep_distances))
         arr = np.asarray(ep_distances, dtype=np.float64)
         episode_in_radius.append(int(np.count_nonzero(arr <= station_radius)))
-        final_distances.append(float(ep_distances[-1]) if ep_distances else float("nan"))
+        final_distances.append(
+            float(ep_distances[-1]) if ep_distances else float("nan")
+        )
         all_distances.extend(ep_distances)
         termination_counts[_termination_reason(info, terminated, truncated)] += 1
 
@@ -374,8 +377,7 @@ class TWREvalCallback(BaseCallback):
         self.deterministic = deterministic
         # None -> derive from the eval env, so the logged TWR always matches the
         # radius the env actually rewards against (see evaluate_policy_twr).
-        self.station_radius = (
-            None if station_radius is None else float(station_radius))
+        self.station_radius = None if station_radius is None else float(station_radius)
         self.max_episode_steps = max_episode_steps
         self.callback_on_new_best = callback_on_new_best
 
@@ -438,16 +440,22 @@ class TWREvalCallback(BaseCallback):
 
         self.logger.record("eval/twr", self.last_twr)
         self.logger.record("eval/mean_return", float(results["mean_return"]))
-        self.logger.record("eval/mean_final_distance", float(results["mean_final_distance"]))
+        self.logger.record(
+            "eval/mean_final_distance", float(results["mean_final_distance"])
+        )
         self.logger.record("eval/mean_ep_length", float(results["mean_episode_length"]))
-        self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
+        self.logger.record(
+            "time/total_timesteps", self.num_timesteps, exclude="tensorboard"
+        )
         self.logger.dump(self.num_timesteps)
 
         continue_training = True
         if self.last_twr > self.best_twr:
             self.best_twr = self.last_twr
             if self.best_model_save_path is not None:
-                self.model.save(os.path.join(self.best_model_save_path, self.best_model_name))
+                self.model.save(
+                    os.path.join(self.best_model_save_path, self.best_model_name)
+                )
             if self.verbose >= 1:
                 print(f"New best TWR: {self.best_twr:.3f}")
             if self.callback_on_new_best is not None:

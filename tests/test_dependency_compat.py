@@ -53,12 +53,14 @@ class TestSecurityPatchedPackages:
     def test_minimum_patched_version(self, package, min_version):
         from packaging.version import Version
 
-        mod = importlib.import_module(package if package != "fonttools" else "fontTools")
+        mod = importlib.import_module(
+            package if package != "fonttools" else "fontTools"
+        )
         installed = Version(mod.__version__)
         required = Version(min_version)
-        assert installed >= required, (
-            f"{package} {installed} < required minimum {required}"
-        )
+        assert (
+            installed >= required
+        ), f"{package} {installed} < required minimum {required}"
 
     def test_jinja2_sandbox_patch(self):
         """Confirm CVE-2025-27516 is mitigated: |attr('format') must not

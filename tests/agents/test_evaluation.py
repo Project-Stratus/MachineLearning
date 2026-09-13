@@ -40,15 +40,26 @@ class StubEnv:
     stub proves the contract rather than the physics.
     """
 
-    def __init__(self, distances, rewards=None, termination_reason=None,
-                 terminate=False, max_episode_steps=None):
+    def __init__(
+        self,
+        distances,
+        rewards=None,
+        termination_reason=None,
+        terminate=False,
+        max_episode_steps=None,
+    ):
         self.distances = list(distances)
-        self.rewards = list(rewards) if rewards is not None else [1.0] * len(self.distances)
+        self.rewards = (
+            list(rewards) if rewards is not None else [1.0] * len(self.distances)
+        )
         self.termination_reason = termination_reason
         self.terminate = terminate
         self.spec = SimpleNamespace(
-            max_episode_steps=max_episode_steps if max_episode_steps is not None
-            else len(self.distances)
+            max_episode_steps=(
+                max_episode_steps
+                if max_episode_steps is not None
+                else len(self.distances)
+            )
         )
         self.seeds_seen = []
         self.actions_seen = []
@@ -190,8 +201,9 @@ class TestEvaluatePolicyTWR:
         # 3 of 5 samples inside the radius; the boundary sample counts as inside.
         env = StubEnv([0.0, 5_000.0, 10_000.0, 15_000.0, 20_000.0])
         scenarios = make_scenario_set(4, seed=0)
-        results = evaluate_policy_twr(PassiveDriftAgent(), env, scenarios,
-                                      station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(), env, scenarios, station_radius=RADIUS
+        )
 
         assert results["twr"] == pytest.approx(0.6)
         assert results["twr_pooled"] == pytest.approx(0.6)
@@ -203,22 +215,38 @@ class TestEvaluatePolicyTWR:
 
     def test_all_in_radius_scores_one(self):
         env = StubEnv([0.0] * 10)
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(2, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(2, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["twr"] == pytest.approx(1.0)
 
     def test_none_in_radius_scores_zero(self):
         env = StubEnv([50_000.0] * 10)
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(2, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(2, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["twr"] == pytest.approx(0.0)
 
     def test_early_termination_is_not_rewarded(self):
         """Parking on station and then dying must not score a perfect TWR."""
-        env = StubEnv([0.0, 0.0], terminate=True, termination_reason="deflated",
-                      max_episode_steps=10)
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(3, seed=0), station_radius=RADIUS)
+        env = StubEnv(
+            [0.0, 0.0],
+            terminate=True,
+            termination_reason="deflated",
+            max_episode_steps=10,
+        )
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(3, seed=0),
+            station_radius=RADIUS,
+        )
         # 2 in-radius steps out of a 10-step scheduled flight.
         assert results["twr"] == pytest.approx(0.2)
         # Step-weighted pooling is the number that *would* have said 1.0.
@@ -226,17 +254,25 @@ class TestEvaluatePolicyTWR:
 
     def test_explicit_horizon_overrides_env_spec(self):
         env = StubEnv([0.0] * 5, max_episode_steps=5)
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(1, seed=0),
-                                      station_radius=RADIUS, max_episode_steps=20)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(1, seed=0),
+            station_radius=RADIUS,
+            max_episode_steps=20,
+        )
         assert results["horizon"] == 20
         assert results["twr"] == pytest.approx(0.25)
 
     def test_horizon_falls_back_to_longest_episode(self):
         env = StubEnv([0.0] * 4)
         env.spec = None
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(2, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(2, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["horizon"] == 4
         assert results["twr"] == pytest.approx(1.0)
 
@@ -248,34 +284,54 @@ class TestEvaluatePolicyTWR:
 
     def test_termination_counts(self):
         env = StubEnv([1.0], terminate=True, termination_reason="ballast_empty")
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(3, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(3, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["termination_counts"] == {"ballast_empty": 3}
 
     def test_truncation_counts_as_time_limit(self):
         env = StubEnv([1.0])
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(2, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(2, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["termination_counts"] == {"time_limit": 2}
 
     def test_returns_are_summed_rewards(self):
         env = StubEnv([0.0, 0.0, 0.0], rewards=[1.0, 0.5, 0.25])
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(2, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(2, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["mean_return"] == pytest.approx(1.75)
         assert results["episode_returns"] == pytest.approx([1.75, 1.75])
 
     def test_policy_actions_reach_the_env(self):
         env = StubEnv([0.0] * 3)
-        evaluate_policy_twr(PassiveDriftAgent(), env, make_scenario_set(2, seed=0),
-                            station_radius=RADIUS)
+        evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(2, seed=0),
+            station_radius=RADIUS,
+        )
         assert env.actions_seen == [ACTION_STAY] * 6
         assert all(isinstance(a, int) for a in env.actions_seen)
 
     def test_works_with_a_stateful_baseline(self):
         env = StubEnv([0.0] * 5)
-        results = evaluate_policy_twr(RandomAgent(seed=4), env,
-                                      make_scenario_set(3, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            RandomAgent(seed=4),
+            env,
+            make_scenario_set(3, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["n_episodes"] == 3
         assert set(env.actions_seen) <= {0, 1, 2}
 
@@ -287,13 +343,18 @@ class TestEvaluatePolicyTWR:
 
     def test_missing_distance_is_an_error(self):
         with pytest.raises(KeyError, match="distance"):
-            evaluate_policy_twr(PassiveDriftAgent(), NoDistanceEnv([0.0]),
-                                make_scenario_set(1, seed=0))
+            evaluate_policy_twr(
+                PassiveDriftAgent(), NoDistanceEnv([0.0]), make_scenario_set(1, seed=0)
+            )
 
     def test_per_episode_breakdown(self):
         env = StubEnv([0.0, 20_000.0])
-        results = evaluate_policy_twr(PassiveDriftAgent(), env,
-                                      make_scenario_set(3, seed=0), station_radius=RADIUS)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(3, seed=0),
+            station_radius=RADIUS,
+        )
         assert results["episode_twr"] == pytest.approx([0.5, 0.5, 0.5])
         assert results["episode_lengths"] == [2, 2, 2]
 
@@ -337,7 +398,7 @@ class TestTWREvalCallback:
     def test_saves_best_by_twr_not_by_return(self):
         """A higher-return but lower-TWR eval must not overwrite the checkpoint."""
         with tempfile.TemporaryDirectory() as tmp:
-            good = StubEnv([0.0, 0.0, 0.0, 0.0], rewards=[1.0] * 4)     # twr 1.0, return 4
+            good = StubEnv([0.0, 0.0, 0.0, 0.0], rewards=[1.0] * 4)  # twr 1.0, return 4
             cb, model = self._callback(good, save_path=tmp)
             cb.on_step()
             assert len(model.saved) == 1
@@ -349,7 +410,7 @@ class TestTWREvalCallback:
             cb.on_step()
             assert cb.last_twr == pytest.approx(0.0)
             assert cb.last_results["mean_return"] == pytest.approx(400.0)
-            assert len(model.saved) == 1          # not overwritten
+            assert len(model.saved) == 1  # not overwritten
             assert cb.best_twr == pytest.approx(1.0)
 
     def test_saves_again_on_improvement(self):
@@ -363,8 +424,13 @@ class TestTWREvalCallback:
             assert cb.best_twr == pytest.approx(1.0)
 
     def test_eval_freq_gates_evaluation(self):
-        cb = TWREvalCallback(StubEnv([0.0]), make_scenario_set(1, seed=0),
-                             eval_freq=3, station_radius=RADIUS, verbose=0)
+        cb = TWREvalCallback(
+            StubEnv([0.0]),
+            make_scenario_set(1, seed=0),
+            eval_freq=3,
+            station_radius=RADIUS,
+            verbose=0,
+        )
         model = StubModel()
         cb.init_callback(model)
         for _ in range(2):
