@@ -56,21 +56,28 @@ Run ONE of these options depending on your intention:
 - Development tooling (recommended): `pip install -e .[dev]`
 - GPU-enabled training stack: `pip install -e .[dev,gpu]`
 
+### Install the pre-commit hooks (required if you plan to commit)
+This repo enforces formatting (`black`), linting (`ruff`), and a few hygiene
+checks (large-file guard, notebook output stripping, etc.) via
+[pre-commit](https://pre-commit.com/). **Every contributor needs to install
+these once per clone** — they run automatically on `git commit` and are what
+catches a formatting/lint issue before it reaches a PR, rather than in CI
+after the fact. The `pre-commit` CLI comes from the `dev` extra installed
+above.
+```bash
+pre-commit install
+```
+To run every hook against the whole repo right away (recommended the first
+time, and any time you want to check without committing):
+```bash
+pre-commit run --all-files
+```
+
 ### Smoke tests
 1. Run install check: `python tests/check_install.py --build --pip-check`
 2. Run unit/integration tests: `pytest`
 
 **For contribution guidelines and PR expectations, see `CONTRIBUTING.md`.**
-
-### Pre-commit hooks
-We use `black` (formatting) and `ruff` (linting) enforced via pre-commit hooks. Set them up once after cloning:
-```bash
-pre-commit install
-```
-Hooks run automatically on `git commit`. To run them manually across the whole repo:
-```bash
-pre-commit run --all-files
-```
 
 ### Training & Running
 ```bash
@@ -100,7 +107,7 @@ TensorBoard picks up new event files as they arrive, so re-running the rsync is 
 
 ## Basic repo layout:
 - `EDA/`: exploratory analyses, notebooks, and supporting scripts for balloon data
-- `src/agents/`: QR-DQN agent and training/eval logic (deprecated agents in `old/`)
+- `src/agents/`: QR-DQN agent and training/eval logic
 - `src/environments/`: gym-compatible Balloon3D environment, physics core, renderers, rewards
 - `src/models/`: persisted checkpoints and training artefacts
 - `tests/`: pytest suite
