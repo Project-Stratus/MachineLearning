@@ -33,6 +33,7 @@ class PygameRenderer:
         y_centers: np.ndarray,
         wind_cells: int,
         dim: int,
+        fps: int = 60,
     ):
         self.window_w, self.window_h = window_size
         self.x_range, self.y_range, self.z_range = x_range, y_range, z_range
@@ -51,7 +52,11 @@ class PygameRenderer:
         pygame.display.set_caption(f"Project Stratus - {self.dim}D Balloon Environment")
         self.window = pygame.display.set_mode(window_size, display=0)
         self.clock = pygame.time.Clock()
-        self.fps = 60
+        # One decision = `decision_interval` sub-steps, each rendered once, each
+        # throttled to `fps` -> decisions/sec = fps / decision_interval (60 sub-steps
+        # by default). fps=60 is real-time-feeling (~1 decision/s); scale it up to
+        # fast-forward playback.
+        self.fps = fps
         self.skip_requested = False
         self.quit_requested = False
 

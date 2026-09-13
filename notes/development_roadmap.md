@@ -51,6 +51,9 @@ Two framing points that cut across every layer:
 Layers 1–2 are deterministic. Layer 3 is where the environment becomes genuinely
 stochastic. Layer 4 is where it becomes ours specifically.
 
+**Where we are:** Layer 1 is closed out — trained and benchmarked, clearing its
+exit criterion. Layer 2 is next; see §9 for the open questions to settle first.
+
 ---
 
 ## 2. Cross-Cutting Decisions
@@ -114,10 +117,12 @@ daytime only, with complete information and no stochastic dynamics.
 **Exit criterion:** beats passive-drift and random baselines on a frozen
 held-out scenario set, measured in time-within-radius.
 
-> **Status: implemented, not yet trained.** Everything in this section is in the
-> code and the suite is green (748 tests). The exit criterion is not yet met
-> because no training run has been done — that is the next action, not
-> outstanding work.
+> **Status: implemented, trained, and benchmarked — exit criterion met.**
+> Everything in this section is in the code, the suite is green, and a full
+> training run has cleared the greedy-wind bar below by a wide margin on the
+> held-out scenario set. Regenerate the agent's current number with
+> `python main.py --benchmark --dim 3` rather than trusting a figure recorded
+> here — it moves across training runs and this doc does not track it.
 >
 > Measured held-out baselines (meta-seed 2026, 12 scenarios, ZP), which are the
 > bar a trained agent has to clear. Regenerate with
@@ -604,21 +609,60 @@ Layer 2, and the discount horizon whenever the decision interval changes.
 
 ## 9. Open Questions
 
-Parameters not answerable from the codebase, roughly in the order they block
-work:
+Parameters not answerable from the codebase. Split into what's settled and
+what still blocks work.
 
-1. **Mission geometry** (blocks §3.2). What station-keeping radius and operating
-   box are realistic for us? 10 km / 20 km half-life / ±50 km are inherited from
-   a scaled-down Loon.
-2. **ZP platform sizing** (blocks §3.6). Envelope volume, payload, ballast mass,
-   helium fill. `VOL_MAX = 180.6 m³`, `PAYLOAD_MASS = 2.0 kg`,
-   `BALLAST_INITIAL = 5.0 kg` were chosen to make ALT_MAX come out at 40 km.
-3. **Actuator rates** (blocks §3.7). What can our valve and ballast hopper
-   actually do per actuation?
-4. **Does the 12 h window include ascent** (blocks §6.5), or is it 12 h at float?
-5. **Launch latitude and season** (blocks §4.4). Needed for solar elevation and
-   realistic winds.
-6. **Sensor suite** (blocks §6.1). Fixes the observable set.
-7. **Real decision cadence** (blocks §6.3). What did the EDA latency work
-   conclude?
-8. **Airspace and recovery limits** (blocks §6.4).
+### Resolved
+
+- **Launch latitude and season** (unblocks §4.2, §4.4). **London, UK; early
+  spring (March/April).** Sensitivity: latitude within southern England is not
+  worth worrying about — London vs. Oxford is well inside the noise of any
+  reanalysis grid and synoptic-scale weather. Season is the sensitive axis,
+  not latitude: solar elevation and day length swing far more with month than
+  with a few tens of km of latitude, which feeds directly into §4.4's
+  radiative model and into how much of the 12h window is night. The UK's
+  polar jet is also typically stronger and more variable in winter than in
+  spring. Training on spring data and later flying in a materially different
+  season (especially winter) should be treated as a real distribution shift,
+  not a rounding error — re-tune or re-generate Layer 2 scenarios for the
+  actual season before relying on results across seasons (this is what §4.3's
+  "geographic and seasonal diversity" is for).
+- **Does the 12h window include ascent** (unblocks §6.5). **No** — ascent is
+  not modelled. Instead the balloon always initialises near the *bottom* of
+  the permitted altitude band rather than mid-band, so the agent starts doing
+  the thing being measured almost immediately rather than spending budget
+  climbing. Implementation note: this needs `Balloon3DEnv.DEFAULTS["spawn_alt_range"]`
+  (currently mid-band, see `balloon_3d_env.py`) changed to hug `ALT_SAFE_MIN`
+  — held off until ZP platform sizing (below) settles where the band actually
+  sits, since that bound may move.
+
+### Provisional — set pending real experiments
+
+- **Mission geometry** (blocks §3.2). No strong internal signal for this, so
+  anchor to Loon's own operational figure rather than an arbitrary guess:
+  their published TWR50 metric names a **50 km** station-keeping radius,
+  chosen for realistic aerial-comms coverage from altitude — a better-founded
+  starting point than the current 10 km scaled-down placeholder. The reward
+  decay half-life has no equivalent citation; scaling it with the radius in
+  the same ratio as today's config is a reasonable default pending tuning.
+  This is coupled to §3.2's already-flagged issue: the current ±50 km
+  terminating box would put the balloon right at the wall on day one if the
+  radius grows to match, and Loon deliberately let balloons drift out to
+  ~300 km without terminating so recovery behaviour could be learned — decide
+  the box size together with the radius, not as a separate knob. Expect all of
+  this to move once Layer 2 scenarios give something real to tune against.
+
+### Still open
+
+- **ZP platform sizing** (blocks §3.6, and now also gates the ascent decision
+  above). ⚠ **Unverified — confirm against real hardware before this hardens
+  into anything Layer 4/flight relies on.** Envelope volume, payload mass,
+  ballast mass, and helium fill in `constants.py` are currently chosen to hit
+  a target altitude ceiling analytically, not measured from an actual
+  envelope/payload. Flag carried in `constants.py` itself as a reminder.
+- **Actuator rates** (blocks §3.7). What can our valve and ballast hopper
+  actually do per actuation?
+- **Sensor suite** (blocks §6.1). Fixes the observable set.
+- **Real decision cadence** (blocks §6.3). What did the EDA latency work
+  conclude?
+- **Airspace and recovery limits** (blocks §6.4).

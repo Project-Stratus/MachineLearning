@@ -181,8 +181,34 @@ _ENV_CONFIG = {
     ),
 }
 
-MAX_ENVS = max(8, os.cpu_count() - 2)
-N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))  # overridden by train(n_envs=...)
+
+def _available_cpus() -> tuple[int, str]:
+    """CPUs this process may actually use, and which signal decided it.
+
+    ``os.cpu_count()`` reports the whole node, not the job's allocation: on a
+    384-core SLURM node with ``--cpus-per-task=4`` it returns 384, which once
+    defaulted training to 192 envs and OOM-killed a 64G job. Take the minimum
+    of the cpuset affinity (Linux only) and ``SLURM_CPUS_PER_TASK`` — both,
+    because whether SLURM narrows the cpuset depends on the cluster's cgroup
+    plugins, while the env var is set regardless.
+    """
+    try:
+        cpus, source = len(os.sched_getaffinity(0)), "sched_getaffinity"
+    except AttributeError:  # macOS / Windows
+        cpus, source = os.cpu_count() or 1, "cpu_count"
+    try:
+        slurm = int(os.environ["SLURM_CPUS_PER_TASK"])
+    except (KeyError, ValueError):
+        slurm = None
+    if slurm is not None and 0 < slurm < cpus:
+        cpus, source = slurm, "SLURM_CPUS_PER_TASK"
+    return max(1, cpus), source
+
+
+AVAILABLE_CPUS, CPU_SOURCE = _available_cpus()
+# No large floor on the cap: `max(8, ...)` let a 4-CPU allocation run 8 envs.
+MAX_ENVS = max(2, AVAILABLE_CPUS - 2)
+N_ENVS = min(MAX_ENVS, max(1, AVAILABLE_CPUS // 2))  # overridden by train(n_envs=...)
 
 
 # --------------------------------------------------------------------------- #
@@ -424,7 +450,8 @@ def train(
     n = n_envs if n_envs is not None else N_ENVS
     _check_train_seeds(SEED, n)
     print(
-        f"Training with {n} environments, dim={dim}, balloon_type={balloon_type}, "
+        f"Training with {n} environments ({AVAILABLE_CPUS} CPUs via {CPU_SOURCE}), "
+        f"dim={dim}, balloon_type={balloon_type}, "
         f"momentum_exploration={momentum_exploration}."
     )
 
@@ -634,9 +661,18 @@ def _print_benchmark_table(
 # --------------------------------------------------------------------------- #
 # Inference
 # --------------------------------------------------------------------------- #
-def test(dim: int, use_gpu: bool = False, balloon_type: str = "zero_pressure") -> None:
+def test(
+    dim: int,
+    use_gpu: bool = False,
+    balloon_type: str = "zero_pressure",
+    render_speed: float = 1.0,
+) -> None:
     """
     Load the saved QR-DQN and run a few episodes with greedy actions.
+
+    ``render_speed`` scales decisions/second relative to the ~1/s default
+    (60 sub-steps per decision, each rendered and capped at 60fps). Pass 4.0
+    for ~4 decisions/second.
     """
     from environments.envs.balloon_3d_env import Actions  # your enum
     from environments.envs.balloon_3d_env import Balloon3DEnv, BalloonSP3DEnv
@@ -662,8 +698,9 @@ def test(dim: int, use_gpu: bool = False, balloon_type: str = "zero_pressure") -
     # Human-render env for demo (shorter episode for interactive viewing)
     test_config = {
         **env_config,
-        "time_max": 7_200,
-    }  # 2 hours of physics -> 120 decisions
+        "time_max": 7_200,  # 2 hours of physics -> 120 decisions
+        "render_fps": max(1, int(round(60 * render_speed))),
+    }
     env: gym.Env = Monitor(
         DecisionIntervalWrapper(
             gym.make(

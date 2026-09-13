@@ -14,7 +14,12 @@ Amateur-scale project — **not** a Loon reimplementation. These constraints dri
 - **Hardware will fly during this project.** Observations must be constructible from real onboard sensors. `volume_norm` is in the observation and has no sensor behind it — a deliberate Layer 4 stub (roadmap §6.1).
 - Station-keeping geometry is still inherited from a scaled-down Loon rather than derived from our mission — an open question (roadmap §9). 3D uses a 10 km radius / 20 km half-life; 1D uses 500 m / 1 km, because reusing the horizontal scales made every 1D state a full-reward state and all baselines scored TWR 1.000.
 
-**Layer 1 is implemented.** Held-out baselines (meta-seed 2026, **12** scenarios, ZP) — regenerate with `python main.py --benchmark --dim N`:
+**Layer 1 is implemented, trained, and benchmarked — exit criterion met.** The
+trained agent clears the `greedy_wind` bar (below) by a wide margin on 3D.
+Held-out baselines (meta-seed 2026, **12** scenarios, ZP) — regenerate with
+`python main.py --benchmark --dim N` for current numbers, including the
+trained agent's, since that figure moves across training runs and is not
+tracked here:
 
 | policy | 1D | 2D | 3D |
 | --- | --- | --- | --- |
@@ -25,7 +30,9 @@ Amateur-scale project — **not** a Loon reimplementation. These constraints dri
 
 The bar is **dim-specific** and `qrdqn.baseline_reference(dim)` is the source of truth — it raises rather than defaulting, because plotting the 3D bar on a 1D curve flatters a bad agent by ~100x. `greedy_wind` only separates from passive in 3D (3.4x); in 1D and 2D it ties with doing nothing, and in 2D it also dies early (ep len 625/720) spending consumables for no gain.
 
-**1D is a debugging mode, not a test.** A two-parameter bang-bang holds station 92% of the time, so a 1D result says nothing about whether the agent learned anything. Judge Layer 1 on 3D against greedy_wind 0.126.
+**1D is a debugging mode, not a test.** A two-parameter bang-bang holds station 92% of the time, so a 1D result says nothing about whether the agent learned anything. Judge Layer 1 on 3D against greedy_wind.
+
+Layer 2 is next — see `notes/development_roadmap.md` §9 for the open questions to settle first.
 
 Google Loon is used as **prior art for validation**, not as the thing being replicated. When citing it, frame it as evidence a design works at scale rather than as the reason to adopt it.
 

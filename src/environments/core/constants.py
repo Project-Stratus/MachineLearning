@@ -69,6 +69,10 @@ RESOURCE_PENALTY_BASE = 0.97  # Multiplicative factor at omega -> 0+
 RESOURCE_PENALTY_SLOPE = 0.3  # Extra penalty per unit consumed fraction
 
 # ----- BALLOON CONSTANTS -----
+# TODO(roadmap §9): PAYLOAD_MASS, BALLAST_INITIAL and VOL_MAX below are picked
+# to hit a target ALT_MAX analytically -- they are NOT measured from a real
+# envelope/payload. Verify against real hardware before anything in Layer 4
+# or a real flight depends on them.
 PAYLOAD_MASS = 2.0  # Fixed structural mass: envelope + gondola + electronics (kg)
 BALLAST_INITIAL = 5.0  # Expendable ballast mass at launch (kg)
 BALLAST_DROP = 0.01  # Ballast mass dropped per "drop" action (kg)

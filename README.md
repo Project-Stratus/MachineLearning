@@ -26,6 +26,8 @@ Stratus is an amateur-scale project. We are **not** rebuilding Loon — the cons
 
 Development is staged into five layers, each independently trainable and measurable before the next begins: deterministic basics → deterministic weather → uncertainty → hardware → deferred long-duration superpressure. See [`notes/development_roadmap.md`](notes/development_roadmap.md).
 
+**Current status:** Layer 1 (deterministic basics) is complete — trained and benchmarked, clearing its exit criterion against the held-out baselines. Layer 2 (weather) is next.
+
 > **Note:** the station-keeping geometry (10 km radius, 20 km reward half-life) is still inherited from a scaled-down Loon rather than derived from our mission. It is tracked as an open question in the roadmap, not a settled decision.
 
 ## How it works
