@@ -7,10 +7,15 @@ a layer, it is cross-referenced.
 
 ## Known simplifications
 - [x] ~~Altitude-dependent gas temperature: replace constant T_BALLOON (20°C)~~ — done in §3.6. `T_BALLOON = 293.15 K` is gone; gas temperature is now `T_ambient(z) + SUPERHEAT_DAY` (15 K). The full radiative model is still Layer 2 §4.4.
-- [ ] Ambient temperature is still ISA, which §3.10 measured at **+16.1 K too warm** against tropical flight data — a bigger error than the superheat offset it carries. Blocked on open question §9.5 (launch latitude); the fix is Layer 2 §4.2's reanalysis profiles. *Roadmap: §3.10.*
+- [ ] Ambient temperature is still ISA, which §3.10 measured at **+16.1 K too warm** against tropical flight data — a bigger error than the superheat offset it carries. Launch latitude/season is now resolved (London, UK; early spring — roadmap §9), so this is unblocked; the fix is Layer 2 §4.2's reanalysis profiles pulled for that location/season. *Roadmap: §3.10.*
 - [ ] (Low priority) Add vertical wind component: the wind field currently has no vertical component (fz = 0). Stratospheric vertical winds are small but non-zero; adding them would improve realism. *Roadmap: Layer 2 §4.2.*
 - [ ] (Low priority) Recompute volume at Verlet half-step: during integration, density is recomputed at the updated altitude but volume (V = nRT/P) is not. For DT=1s the error is negligible, but recomputing would make the two force evaluations fully consistent.
 - [ ] (Low priority) Extend ISA beyond two layers: the atmosphere model covers the troposphere and stratosphere only. Adding the mesosphere and above would allow operations beyond ~50 km, but is unnecessary for the current ~25 km ceiling. *Roadmap: Layer 2 §4.2 (superseded if we move to reanalysis profiles).*
+
+## Layer 2 groundwork
+- [ ] **Verify ZP platform sizing against real hardware** (`PAYLOAD_MASS`, `BALLAST_INITIAL`, `VOL_MAX` in `constants.py`). Currently picked analytically to hit a target ceiling, not measured. Flagged in-code and in roadmap §9. Blocks finalising the ascent/spawn-altitude change below and, longer term, §3.6/§6.1.
+- [ ] Once the above lands, change `Balloon3DEnv.DEFAULTS["spawn_alt_range"]` from mid-band to hug `ALT_SAFE_MIN`, per the ascent decision in roadmap §9 (no ascent phase modelled; balloon starts near the bottom of the permitted band instead).
+- [ ] Retune mission geometry (`STATION_RADIUS`, `REWARD_HALFLIFE`, box size in `constants.py` / `Balloon3DEnv.DEFAULTS`) once Layer 2 scenarios exist to test against — provisional starting point (50 km radius, from Loon's own TWR50 definition) recorded in roadmap §9.
 
 ## Training performance
 - [ ] (Low priority) Increase `train_freq` (currently 4) to 8-16 to reduce gradient updates per env step. Trades sample efficiency for wall-clock speed — not worth doing unless training time becomes a bottleneck again, since GPU and vectorised envs already address the main performance issues.
