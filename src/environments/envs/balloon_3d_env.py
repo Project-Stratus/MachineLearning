@@ -1199,6 +1199,7 @@ class Balloon3DEnv(gym.Env):
                 y_centers=self.y_centers,
                 wind_cells=self.wind_cells,
                 dim=self.dim,
+                fps=self.cfg.get("render_fps", 60),
             )
 
 

@@ -81,6 +81,13 @@ if __name__ == "__main__":
         "pilot run before committing to the full one; the eval cadence "
         "compresses automatically so the pilot still tests checkpointing.",
     )
+    parser.add_argument(
+        "--render-speed",
+        type=float,
+        default=1.0,
+        help="Playback speed multiplier for --dim render mode (no --train). "
+        "1.0 is ~1 decision/second (real-time-feeling); 4.0 is ~4/second.",
+    )
     args = parser.parse_args()
 
     if args.benchmark:
@@ -165,4 +172,9 @@ if __name__ == "__main__":
                     f"Eval figure saved to {save_dir}/eval_curve_dim{args.dim}_{args.balloon_type}.png"
                 )
     else:
-        qrdqn.test(dim=args.dim, use_gpu=args.gpu, balloon_type=args.balloon_type)
+        qrdqn.test(
+            dim=args.dim,
+            use_gpu=args.gpu,
+            balloon_type=args.balloon_type,
+            render_speed=args.render_speed,
+        )

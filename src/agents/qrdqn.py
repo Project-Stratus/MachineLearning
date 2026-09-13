@@ -661,9 +661,18 @@ def _print_benchmark_table(
 # --------------------------------------------------------------------------- #
 # Inference
 # --------------------------------------------------------------------------- #
-def test(dim: int, use_gpu: bool = False, balloon_type: str = "zero_pressure") -> None:
+def test(
+    dim: int,
+    use_gpu: bool = False,
+    balloon_type: str = "zero_pressure",
+    render_speed: float = 1.0,
+) -> None:
     """
     Load the saved QR-DQN and run a few episodes with greedy actions.
+
+    ``render_speed`` scales decisions/second relative to the ~1/s default
+    (60 sub-steps per decision, each rendered and capped at 60fps). Pass 4.0
+    for ~4 decisions/second.
     """
     from environments.envs.balloon_3d_env import Actions  # your enum
     from environments.envs.balloon_3d_env import Balloon3DEnv, BalloonSP3DEnv
@@ -689,8 +698,9 @@ def test(dim: int, use_gpu: bool = False, balloon_type: str = "zero_pressure") -
     # Human-render env for demo (shorter episode for interactive viewing)
     test_config = {
         **env_config,
-        "time_max": 7_200,
-    }  # 2 hours of physics -> 120 decisions
+        "time_max": 7_200,  # 2 hours of physics -> 120 decisions
+        "render_fps": max(1, int(round(60 * render_speed))),
+    }
     env: gym.Env = Monitor(
         DecisionIntervalWrapper(
             gym.make(
