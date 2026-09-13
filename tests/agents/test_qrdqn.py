@@ -109,6 +109,36 @@ class TestTrainingConfig:
 
 
 # --------------------------------------------------------------------------- #
+# CPU / default env-count resolution
+# --------------------------------------------------------------------------- #
+class TestAvailableCpus:
+    def test_slurm_allocation_caps_affinity(self, monkeypatch):
+        monkeypatch.setattr(qrdqn.os, "sched_getaffinity", lambda pid: set(range(384)), raising=False)
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "4")
+        assert qrdqn._available_cpus() == (4, "SLURM_CPUS_PER_TASK")
+
+    def test_affinity_wins_when_narrower_than_slurm(self, monkeypatch):
+        monkeypatch.setattr(qrdqn.os, "sched_getaffinity", lambda pid: {0, 1}, raising=False)
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "4")
+        assert qrdqn._available_cpus() == (2, "sched_getaffinity")
+
+    def test_bad_slurm_value_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(qrdqn.os, "sched_getaffinity", lambda pid: set(range(6)), raising=False)
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "not-a-number")
+        assert qrdqn._available_cpus() == (6, "sched_getaffinity")
+
+    def test_falls_back_to_cpu_count_without_affinity(self, monkeypatch):
+        monkeypatch.delattr(qrdqn.os, "sched_getaffinity", raising=False)
+        monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+        monkeypatch.setattr(qrdqn.os, "cpu_count", lambda: 12)
+        assert qrdqn._available_cpus() == (12, "cpu_count")
+
+    def test_default_env_count_fits_the_allocation(self):
+        assert 1 <= qrdqn.N_ENVS <= qrdqn.MAX_ENVS
+        assert qrdqn.N_ENVS <= max(1, qrdqn.AVAILABLE_CPUS)
+
+
+# --------------------------------------------------------------------------- #
 # Train / held-out seed split
 # --------------------------------------------------------------------------- #
 class TestSeedGuard:

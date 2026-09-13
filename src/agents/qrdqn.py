@@ -181,8 +181,34 @@ _ENV_CONFIG = {
     ),
 }
 
-MAX_ENVS = max(8, os.cpu_count() - 2)
-N_ENVS = min(MAX_ENVS, max(1, os.cpu_count() // 2))  # overridden by train(n_envs=...)
+
+def _available_cpus() -> tuple[int, str]:
+    """CPUs this process may actually use, and which signal decided it.
+
+    ``os.cpu_count()`` reports the whole node, not the job's allocation: on a
+    384-core SLURM node with ``--cpus-per-task=4`` it returns 384, which once
+    defaulted training to 192 envs and OOM-killed a 64G job. Take the minimum
+    of the cpuset affinity (Linux only) and ``SLURM_CPUS_PER_TASK`` — both,
+    because whether SLURM narrows the cpuset depends on the cluster's cgroup
+    plugins, while the env var is set regardless.
+    """
+    try:
+        cpus, source = len(os.sched_getaffinity(0)), "sched_getaffinity"
+    except AttributeError:  # macOS / Windows
+        cpus, source = os.cpu_count() or 1, "cpu_count"
+    try:
+        slurm = int(os.environ["SLURM_CPUS_PER_TASK"])
+    except (KeyError, ValueError):
+        slurm = None
+    if slurm is not None and 0 < slurm < cpus:
+        cpus, source = slurm, "SLURM_CPUS_PER_TASK"
+    return max(1, cpus), source
+
+
+AVAILABLE_CPUS, CPU_SOURCE = _available_cpus()
+# No large floor on the cap: `max(8, ...)` let a 4-CPU allocation run 8 envs.
+MAX_ENVS = max(2, AVAILABLE_CPUS - 2)
+N_ENVS = min(MAX_ENVS, max(1, AVAILABLE_CPUS // 2))  # overridden by train(n_envs=...)
 
 
 # --------------------------------------------------------------------------- #
@@ -424,7 +450,8 @@ def train(
     n = n_envs if n_envs is not None else N_ENVS
     _check_train_seeds(SEED, n)
     print(
-        f"Training with {n} environments, dim={dim}, balloon_type={balloon_type}, "
+        f"Training with {n} environments ({AVAILABLE_CPUS} CPUs via {CPU_SOURCE}), "
+        f"dim={dim}, balloon_type={balloon_type}, "
         f"momentum_exploration={momentum_exploration}."
     )
 
