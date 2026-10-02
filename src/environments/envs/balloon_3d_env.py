@@ -35,16 +35,16 @@ The effect-to-index mapping is defined in `_action_lut`.
 =========
 Observation space
 =========
-A flat ``float32`` Box of width :data:`OBS_WIDTH` (143), **identical for
+A flat ``float32`` Box of width :data:`OBS_WIDTH` (144), **identical for
 dim 1, 2 and 3** — fields that are meaningless in a given dimension are
-zeroed, never omitted (Layer 1 contract §1, roadmap §2.1).  Later layers
+zeroed, never omitted (Layer 2 contract, roadmap §2.1). Later layers
 populate the stub fields in place, so crossing a layer boundary costs a
 retrain of weights rather than a re-architecture.
 
     indices   0..122 : wind column, 41 levels x 3 channels (mag, bearing,
                        uncertainty), 250 m apart, centred on the balloon's
                        own altitude and ordered low to high.
-    indices 123..142 : 20 ambient scalars, see :data:`AMBIENT_FIELDS`.
+    indices 123..143 : 21 ambient scalars, see :data:`AMBIENT_FIELDS`.
 
 Levels outside the operational band ``[ALT_SAFE_MIN, ALT_SAFE_MAX]`` carry
 the *limit triple* ``(1.0, 1.0, 0.0)`` — "confidently, a fast wind straight
@@ -91,6 +91,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from pathlib import Path
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -118,6 +119,15 @@ except Exception:  # pragma: no cover - numba is a hard dependency, but stay hon
 from environments.core.balloon import Balloon, BalloonSP  # noqa: E402
 from environments.core.atmosphere import Atmosphere  # noqa: E402
 from environments.core.wind_field import WindField  # noqa: E402
+from environments.core.weather import (  # noqa: E402
+    ReanalysisAtmosphere,
+    ReanalysisWeatherProvider,
+)
+from environments.core.weather_scenarios import (  # noqa: E402
+    WeatherScenario,
+    WeatherScenarioManifest,
+    sha256_file,
+)
 from environments.core.reward import balloon_reward, l2_distance  # noqa: E402
 from environments.render.pygame_render import PygameRenderer  # noqa: E402
 from environments.core.constants import (  # noqa: E402
@@ -149,6 +159,7 @@ from environments.core.constants import (  # noqa: E402
     WIND_COL_SPACING,
     WIND_MAG_NORM,
     OBS_WIDTH,
+    RADIATIVE_FORCING_NORM,
     DIST_NORM,
     STATION_RADIUS,
     REWARD_HALFLIFE,
@@ -160,7 +171,7 @@ from environments.core.constants import (  # noqa: E402
 _JIT_WARMED = False  # whether numba JIT has been warmed up
 
 # --------------------------------------------------------------------------- #
-# Frozen observation layout — Layer 1 contract §1 (mirrored in agents.baselines)
+# Frozen observation layout — Layer 2 contract (mirrored in agents.baselines)
 # --------------------------------------------------------------------------- #
 # This module is the *producer* of the layout; ``agents.baselines`` mirrors it
 # so the agent package stays importable without the physics stack.  The two are
@@ -201,6 +212,7 @@ AMBIENT_FIELDS: Tuple[str, ...] = (
     "solar_elevation",  # 140  STUB (Layer 2)
     "solar_phase_sin",  # 141  STUB (Layer 2)
     "solar_phase_cos",  # 142  STUB (Layer 2)
+    "radiative_forcing_norm",  # 143  live with Layer 2.4 thermal forcing
 )
 AMBIENT_IDX: Dict[str, int] = {
     name: AMBIENT_START + i for i, name in enumerate(AMBIENT_FIELDS)
@@ -226,6 +238,7 @@ IDX_RESOURCE_B_LOW = AMBIENT_IDX["resource_b_low"]
 IDX_SOLAR_ELEVATION = AMBIENT_IDX["solar_elevation"]
 IDX_SOLAR_PHASE_SIN = AMBIENT_IDX["solar_phase_sin"]
 IDX_SOLAR_PHASE_COS = AMBIENT_IDX["solar_phase_cos"]
+IDX_RADIATIVE_FORCING_NORM = AMBIENT_IDX["radiative_forcing_norm"]
 
 assert (
     AMBIENT_START + len(AMBIENT_FIELDS) == OBS_WIDTH
@@ -355,6 +368,12 @@ class Balloon3DEnv(gym.Env):
         spawn_dist_range=(2_000.0, 30_000.0),  # horizontal spawn offset from the goal
         spawn_alt_range=(ALT_SAFE_MIN + 1_000.0, ALT_SAFE_MAX - 1_000.0),
         goal_alt_range=(ALT_SAFE_MIN + 1_000.0, ALT_SAFE_MAX - 1_000.0),  # 1D only
+        # --- Layer 2 deterministic weather -------------------------------
+        weather_path=None,  # direct preprocessed .npz cube (single scenario)
+        weather_manifest=None,  # JSON manifest produced by build_weather_manifest.py
+        weather_split="train",  # train or heldout records from the manifest
+        weather_bounds_policy="clip",  # clip or raise outside the downloaded cube
+        weather_cache_size=1,  # cubes retained per worker; keep RAM bounded
     )
 
     def __init__(
@@ -437,27 +456,56 @@ class Balloon3DEnv(gym.Env):
             self._ranges = [self.x_range, self.y_range, self.z_range]
 
         # ------------------------------------------------------------------
-        # Wind field
+        # Weather / wind field
         # ------------------------------------------------------------------
         # The vertical resolution is decoupled from the horizontal one: the
         # observation samples wind every WIND_COL_SPACING metres, so a cubic
         # grid coarse enough to be cheap in x/y would hand the agent 41 levels
         # carrying only a handful of distinct values.  ``wind_cells_z=None``
         # asks WindField for the Nyquist count for that spacing.
-        self.wind = WindField(
-            x_range=self.x_range,
-            y_range=self.y_range,
-            z_range=self.z_range,
-            cells=cfg["wind_cells"],
-            pattern=self.cfg.get("wind_pattern", "sinusoid"),
-            default_mag=cfg["wind_mag"],
-            wind_cfg_path=self.wind_cfg_path,
-            wind_layers=cfg["wind_layers"],
-            cells_z=cfg.get("wind_cells_z"),
+        self._weather_manifest: WeatherScenarioManifest | None = None
+        self._weather_scenarios: list[WeatherScenario] = []
+        self._weather_cache: dict[str, ReanalysisWeatherProvider] = {}
+        self._verified_weather_files: dict[Path, str] = {}
+        self._active_weather_scenario: WeatherScenario | None = None
+        self._forced_weather_scenario_id: str | None = None
+        self._is_reanalysis = bool(
+            cfg.get("weather_path") or cfg.get("weather_manifest")
         )
-        # Nominal magnitude *after* the winds.json catalogue has had its say;
-        # the per-episode randomisation is expressed relative to it.
-        self._wind_mag_nominal = float(self.wind.mag)
+
+        if cfg.get("weather_manifest"):
+            self._weather_manifest = WeatherScenarioManifest.load(
+                cfg["weather_manifest"]
+            )
+            split = str(cfg.get("weather_split", "train"))
+            if split not in ("train", "heldout"):
+                raise ValueError("weather_split must be 'train' or 'heldout'")
+            self._weather_scenarios = self._weather_manifest.for_split(split)
+            if not self._weather_scenarios:
+                raise ValueError(f"weather manifest has no {split} scenarios")
+            self._activate_weather_scenario(self._weather_scenarios[0])
+        elif cfg.get("weather_path"):
+            self.wind = ReanalysisWeatherProvider(
+                cfg["weather_path"],
+                bounds_policy=cfg.get("weather_bounds_policy", "clip"),
+            )
+            self.wind.validate_window(float(cfg["time_max"]) * DT)
+        else:
+            self.wind = WindField(
+                x_range=self.x_range,
+                y_range=self.y_range,
+                z_range=self.z_range,
+                cells=cfg["wind_cells"],
+                pattern=self.cfg.get("wind_pattern", "sinusoid"),
+                default_mag=cfg["wind_mag"],
+                wind_cfg_path=self.wind_cfg_path,
+                wind_layers=cfg["wind_layers"],
+                cells_z=cfg.get("wind_cells_z"),
+            )
+
+        # Nominal analytic parameters are unused by reanalysis scenarios but
+        # kept defined so scenario metadata has one stable shape.
+        self._wind_mag_nominal = 0.0 if self._is_reanalysis else float(self.wind.mag)
         self._wind_layers_nominal = float(cfg["wind_layers"])
         mag_range = cfg.get("wind_mag_range")
         if mag_range is None:
@@ -478,7 +526,7 @@ class Balloon3DEnv(gym.Env):
         )
         self._obs_size = self.observation_space.shape[0]
         self._obs_buf = np.zeros(self._obs_size, dtype=np.float32)
-        # Channels that never change in Layer 1 are written once, here.
+        # Channels that do not change until later layers are written once here.
         self._obs_buf[CH_UNCERTAINTY:WIND_COL_WIDTH:WIND_COL_CHANNELS] = LIMIT_TRIPLE[2]
         self._obs_buf[IDX_SOLAR_ELEVATION] = SOLAR_ELEVATION_STUB
         self._obs_buf[IDX_SOLAR_PHASE_SIN] = SOLAR_PHASE_SIN_STUB
@@ -551,6 +599,7 @@ class Balloon3DEnv(gym.Env):
             "heading_cos",
             "solar_phase_sin",
             "solar_phase_cos",
+            "radiative_forcing_norm",
         ):
             low[AMBIENT_IDX[name]] = -1.0
 
@@ -594,7 +643,7 @@ class Balloon3DEnv(gym.Env):
         )
 
     def _get_obs(self) -> np.ndarray:
-        """Pack the frozen 143-wide observation (contract §1)."""
+        """Pack the 144-wide Layer 2 observation contract."""
         buf = self._obs_buf
         b = self._balloon
         dim = self.dim
@@ -658,7 +707,13 @@ class Balloon3DEnv(gym.Env):
         buf[IDX_AT_ALT_MIN] = 1.0 if self._at_alt_min else 0.0
         buf[IDX_AT_ALT_MAX] = 1.0 if self._at_alt_max else 0.0
 
-        # solar stubs were written at construction and never change in Layer 1.
+        if self._is_reanalysis:
+            forcing = self.wind.radiative_forcing(x, y, z) / RADIATIVE_FORCING_NORM
+            buf[IDX_RADIATIVE_FORCING_NORM] = min(max(forcing, -1.0), 1.0)
+        else:
+            buf[IDX_RADIATIVE_FORCING_NORM] = 0.0
+
+        # Solar stubs remain fixed until the Layer 2.4 thermal model lands.
         return buf.copy()
 
     # ------------------------------------------------------------------
@@ -697,6 +752,84 @@ class Balloon3DEnv(gym.Env):
     # ------------------------------------------------------------------
     # Scenario randomisation (roadmap §3.9)
     # ------------------------------------------------------------------
+    def set_weather_scenario(self, scenario_id: str) -> None:
+        """Pin subsequent resets to one manifest record.
+
+        Evaluation uses this hook so a frozen descriptor identifies an actual
+        UTC weather window, not merely a seed that may select a different row
+        if the manifest is reordered.
+        """
+
+        if self._weather_manifest is None:
+            raise RuntimeError("set_weather_scenario requires weather_manifest")
+        scenario = self._weather_manifest.by_id(str(scenario_id))
+        if scenario not in self._weather_scenarios:
+            raise ValueError(
+                f"weather scenario {scenario_id!r} is outside configured split "
+                f"{self.cfg.get('weather_split')!r}"
+            )
+        self._forced_weather_scenario_id = scenario.scenario_id
+
+    def _activate_weather_scenario(self, scenario: WeatherScenario) -> None:
+        assert self._weather_manifest is not None
+        provider = self._weather_cache.get(scenario.scenario_id)
+        if provider is None:
+            path = self._weather_manifest.resolve_weather_path(scenario).resolve()
+            digest = self._verified_weather_files.get(path)
+            if digest is None:
+                digest = sha256_file(path)
+                self._verified_weather_files[path] = digest
+            if digest != scenario.sha256:
+                raise ValueError(
+                    f"weather cube digest mismatch for {path}: "
+                    f"manifest={scenario.sha256}, actual={digest}"
+                )
+            episode_duration = float(self.cfg["time_max"]) * DT
+            if scenario.duration_s < episode_duration:
+                raise ValueError(
+                    f"weather scenario {scenario.scenario_id!r} is only "
+                    f"{scenario.duration_s} s; episode needs {episode_duration} s"
+                )
+            provider = ReanalysisWeatherProvider(
+                path,
+                start_offset_s=scenario.start_offset_s,
+                bounds_policy=self.cfg.get("weather_bounds_policy", "clip"),
+            )
+            provider.validate_window(episode_duration)
+            cache_size = max(1, int(self.cfg.get("weather_cache_size", 2)))
+            if len(self._weather_cache) >= cache_size:
+                self._weather_cache.pop(next(iter(self._weather_cache)))
+            self._weather_cache[scenario.scenario_id] = provider
+        provider.set_time(0.0)
+        self.wind = provider
+        self._active_weather_scenario = scenario
+        self.x_centers = provider.x_centers
+        self.y_centers = provider.y_centers
+        self.z_centers = provider.z_centers
+        self.wind_cells = provider.cells
+
+    def _select_weather_scenario(self) -> None:
+        if not self._weather_scenarios:
+            if self._is_reanalysis:
+                self.wind.set_time(0.0)
+            return
+        if self._forced_weather_scenario_id is not None:
+            assert self._weather_manifest is not None
+            scenario = self._weather_manifest.by_id(self._forced_weather_scenario_id)
+        else:
+            scenario = self._weather_scenarios[
+                int(self.np_random.integers(0, len(self._weather_scenarios)))
+            ]
+        self._activate_weather_scenario(scenario)
+
+    def _set_weather_context(self, position: np.ndarray, elapsed_s: float) -> None:
+        if not self._is_reanalysis:
+            return
+        x, y, _z = self._full_coords(position)
+        self.wind.set_time(elapsed_s)
+        if isinstance(self._atmosphere, ReanalysisAtmosphere):
+            self._atmosphere.set_context(x, y, elapsed_s)
+
     def _draw_scenario(self) -> Dict[str, Any]:
         """Draw goal, spawn and wind-pattern parameters from ``self.np_random``.
 
@@ -709,21 +842,28 @@ class Balloon3DEnv(gym.Env):
         """
         rng = self.np_random
         cfg = self.cfg
-        pattern = cfg.get("wind_pattern", "sinusoid")
+        pattern = "era5" if self._is_reanalysis else cfg.get("wind_pattern", "sinusoid")
         randomise = bool(cfg.get("randomise_scenario", True))
 
         # --- wind field ----------------------------------------------------
-        if randomise:
+        if self._is_reanalysis:
+            wind_mag = 0.0
+            wind_layers = 0.0
+        elif randomise:
             wind_mag = float(rng.uniform(*self._wind_mag_range))
         else:
             wind_mag = self._wind_mag_nominal
-        if randomise and pattern == "altitude_shear_2d":
+        if self._is_reanalysis:
+            pass
+        elif randomise and pattern == "altitude_shear_2d":
             lo, hi = cfg["wind_layers_range"]
             wind_layers = float(rng.uniform(lo, hi))
         else:
             wind_layers = self._wind_layers_nominal
 
-        if wind_mag != self.wind.mag or wind_layers != self.wind.wind_layers:
+        if not self._is_reanalysis and (
+            wind_mag != self.wind.mag or wind_layers != self.wind.wind_layers
+        ):
             self.wind.mag = wind_mag
             self.wind.wind_layers = wind_layers
             self.wind._build_grid()
@@ -776,7 +916,7 @@ class Balloon3DEnv(gym.Env):
                 goal = np.array([gx, gy, self.z0], dtype=np.float64)
                 spawn = np.array([sx, sy, spawn_z], dtype=np.float64)
 
-        return {
+        result = {
             "seed": self._seed,
             "dim": self.dim,
             "balloon_type": self._balloon_type,
@@ -788,6 +928,27 @@ class Balloon3DEnv(gym.Env):
             "_goal": goal,
             "_spawn": spawn,
         }
+        if self._active_weather_scenario is not None:
+            weather = self._active_weather_scenario
+            result.update(
+                {
+                    "weather_scenario_id": weather.scenario_id,
+                    "weather_start_time_utc": weather.start_time_utc,
+                    "weather_split": weather.split,
+                    "weather_difficulty": weather.difficulty_band,
+                    "weather_sha256": weather.sha256,
+                }
+            )
+        elif self._is_reanalysis:
+            result.update(
+                {
+                    "weather_scenario_id": Path(self.cfg["weather_path"]).stem,
+                    "weather_start_time_utc": self.wind.cube.metadata.get(
+                        "start_time_utc", ""
+                    ),
+                }
+            )
+        return result
 
     # ------------------------------------------------------------------
     # Gym API – reset
@@ -806,7 +967,9 @@ class Balloon3DEnv(gym.Env):
         self._omega_steps = 0
         self.prev_action = ACTION_STAY
 
-        self._atmosphere = Atmosphere()
+        if options and options.get("weather_scenario_id") is not None:
+            self.set_weather_scenario(str(options["weather_scenario_id"]))
+        self._select_weather_scenario()
 
         scenario = self._draw_scenario()
         goal = scenario.pop("_goal")
@@ -817,6 +980,12 @@ class Balloon3DEnv(gym.Env):
         real_dim = 3 if self.dim == 2 else self.dim
         # For 2D mode, balloon is internally 3D with fixed altitude z0
         init_pos = np.append(pos0, self.z0) if self.dim == 2 else pos0
+
+        if self._is_reanalysis:
+            self._atmosphere = ReanalysisAtmosphere(self.wind)
+            self._set_weather_context(init_pos, 0.0)
+        else:
+            self._atmosphere = Atmosphere()
 
         if self._balloon_type == "superpressure":
             self._balloon = BalloonSP(
@@ -909,43 +1078,45 @@ class Balloon3DEnv(gym.Env):
                 _ = dynamic_viscosity_numba(1000.0)
                 _ = sphere_area_from_volume(1.0)
                 _ = morrison_cd(1000.0)
-                # wind warmup
+                # Analytic wind kernels only. Reanalysis interpolation has its
+                # own compact array backend and does not carry these grids.
                 wf = self.wind
-                _ = wind_sample_idx_numba(
-                    wf.x_centers[0],
-                    wf.y_centers[0],
-                    wf.z_centers[0],
-                    wf.x_range[0],
-                    wf.inv_dx,
-                    wf.y_range[0],
-                    wf.inv_dy,
-                    wf.z_range[0],
-                    wf.inv_dz,
-                    wf.cells,
-                    wf.cells_z,
-                    wf._fx_grid,
-                    wf._fy_grid,
-                )
-                wind_sample_column_numba(
-                    0.0,
-                    0.0,
-                    20000.0,
-                    WIND_COL_SPACING,
-                    wf.x_range[0],
-                    wf.x_range[1],
-                    wf.inv_dx,
-                    wf.y_range[0],
-                    wf.y_range[1],
-                    wf.inv_dy,
-                    wf.z_range[0],
-                    wf.z_range[1],
-                    wf.inv_dz,
-                    wf.cells,
-                    wf.cells_z,
-                    wf._fx_grid,
-                    wf._fy_grid,
-                    np.zeros((WIND_COL_LEVELS, 2)),
-                )
+                if isinstance(wf, WindField):
+                    _ = wind_sample_idx_numba(
+                        wf.x_centers[0],
+                        wf.y_centers[0],
+                        wf.z_centers[0],
+                        wf.x_range[0],
+                        wf.inv_dx,
+                        wf.y_range[0],
+                        wf.inv_dy,
+                        wf.z_range[0],
+                        wf.inv_dz,
+                        wf.cells,
+                        wf.cells_z,
+                        wf._fx_grid,
+                        wf._fy_grid,
+                    )
+                    wind_sample_column_numba(
+                        0.0,
+                        0.0,
+                        20000.0,
+                        WIND_COL_SPACING,
+                        wf.x_range[0],
+                        wf.x_range[1],
+                        wf.inv_dx,
+                        wf.y_range[0],
+                        wf.y_range[1],
+                        wf.inv_dy,
+                        wf.z_range[0],
+                        wf.z_range[1],
+                        wf.inv_dz,
+                        wf.cells,
+                        wf.cells_z,
+                        wf._fx_grid,
+                        wf._fy_grid,
+                        np.zeros((WIND_COL_LEVELS, 2)),
+                    )
                 # physics warmup (dim-aware)
                 pos = self._balloon.pos.astype(np.float64, copy=True)
                 vel = self._balloon.vel.astype(np.float64, copy=True)
@@ -1043,12 +1214,15 @@ class Balloon3DEnv(gym.Env):
         effect = int(self._action_lut[action])
         omega = self._charge_resources(self._actuate(effect))
 
+        self._set_weather_context(self._balloon.pos, float(self._time) * DT)
         wind = self.wind.sample(*self._full_coords(self._balloon.pos))
         self.last_wind[:] = wind  # Cache for obs (copies before buffer reuse)
 
         # Build wind velocity vector for relative-velocity drag
         if self.dim == 1:
-            self._wind_vel_buf[0] = 0.0
+            # The one simulated axis is vertical. Analytic fields have w=0;
+            # reanalysis fields supply ERA5 omega converted to geometric w.
+            self._wind_vel_buf[0] = wind[2]
             wind_vel = self._wind_vel_buf[:1]
         elif self.dim == 2:
             self._wind_vel_buf[0] = wind[0]
@@ -1078,6 +1252,7 @@ class Balloon3DEnv(gym.Env):
 
         # --- reward & termination -----------------------------------------
         self._time += 1
+        self._set_weather_context(self._balloon.pos, float(self._time) * DT)
 
         deflated = self._balloon.is_deflated
         ballast_empty = self._balloon.is_ballast_empty

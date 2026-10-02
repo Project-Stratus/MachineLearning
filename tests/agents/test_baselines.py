@@ -52,7 +52,7 @@ def make_obs(
     limit_levels=(),
     **ambient_overrides,
 ):
-    """Build a well-formed 143-wide observation.
+    """Build a well-formed 144-wide observation.
 
     ``levels`` overrides individual wind levels: ``{index: (mag, bearing)}``.
     ``limit_levels`` marks levels as outside the operational band.
@@ -91,20 +91,21 @@ class TestObservationLayout:
     """The index block must match the frozen contract exactly."""
 
     def test_widths(self):
-        assert OBS_WIDTH == 143
+        assert OBS_WIDTH == 144
         assert WIND_COL_LEVELS == 41
         assert WIND_COL_WIDTH == 123
         assert WIND_COL_CENTRE == 20
         assert AMBIENT_START == 123
 
     def test_ambient_indices(self):
-        assert len(AMBIENT_IDX) == 20
+        assert len(AMBIENT_IDX) == 21
         assert AMBIENT_IDX["alt_norm"] == 123
         assert AMBIENT_IDX["dist_norm"] == 127
         assert AMBIENT_IDX["resource_a"] == 130
         assert AMBIENT_IDX["last_action_down"] == 133
         assert AMBIENT_IDX["at_alt_min"] == 136
         assert AMBIENT_IDX["solar_phase_cos"] == 142
+        assert AMBIENT_IDX["radiative_forcing_norm"] == 143
         assert max(AMBIENT_IDX.values()) == OBS_WIDTH - 1
 
     def test_action_indices_match_env_lut(self):
@@ -123,7 +124,7 @@ class TestObservationLayout:
     def test_ambient_view(self):
         obs = make_obs(dist_norm=0.3)
         amb = ambient(obs)
-        assert amb.shape == (20,)
+        assert amb.shape == (21,)
         assert amb[IDX_DIST_NORM - AMBIENT_START] == pytest.approx(0.3)
 
     def test_level_offsets(self):
@@ -166,7 +167,7 @@ class TestPassiveDriftAgent:
 
     def test_rejects_wrong_width(self):
         agent = PassiveDriftAgent()
-        with pytest.raises(ValueError, match="width 143"):
+        with pytest.raises(ValueError, match="width 144"):
             agent.predict(np.zeros(19, dtype=np.float32))
 
 

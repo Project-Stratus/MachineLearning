@@ -26,12 +26,27 @@ Stratus is an amateur-scale project. We are **not** rebuilding Loon — the cons
 
 Development is staged into five layers, each independently trainable and measurable before the next begins: deterministic basics → deterministic weather → uncertainty → hardware → deferred long-duration superpressure. See [`notes/development_roadmap.md`](notes/development_roadmap.md).
 
-**Current status:** Layer 1 (deterministic basics) is complete — trained and benchmarked, clearing its exit criterion against the held-out baselines. Layer 2 (weather) is next.
+**Current status:** Layer 1 (deterministic basics) is complete — trained and
+benchmarked, clearing its exit criterion against the held-out baselines. The
+Layer 2 ERA5 runtime, atmosphere coupling, and date-based scenario manifests
+are implemented. The first real London pressure-level cube validates the
+pipeline but is too vertically coarse for production policy training, so a
+model-level corpus is required before weather training. See
+[`notes/weather_pipeline.md`](notes/weather_pipeline.md) and the
+[`first spike report`](notes/era5_spike_2024-03-15.md).
 
 > **Note:** the station-keeping geometry (10 km radius, 20 km reward half-life) is still inherited from a scaled-down Loon rather than derived from our mission. It is tracked as an open question in the roadmap, not a settled decision.
 
 ## How it works
-The agent interacts with a Gym-compatible 3D balloon environment at each timestep. It observes its position, velocity, altitude, ambient pressure, wind vector, and distance to a target location — all normalised to [0, 1]. It then chooses one of three discrete actions: **inflate**, **deflate**, or **do nothing**, which adjusts the balloon's buoyancy and therefore its altitude. By changing altitude, the agent moves into different wind layers and exploits wind currents to navigate toward the target.
+The agent interacts with a Gym-compatible 3D balloon environment at each
+timestep. It observes an altitude-centred wind column, velocity, ambient
+pressure, target geometry, resources, safety state, and weather forcing. The
+channels are bounded and normalised; directional/vertical quantities use
+[-1, 1], while fractions use [0, 1]. It then chooses one of three discrete
+actions: **inflate**, **deflate**, or **do nothing**, which adjusts the
+balloon's buoyancy and therefore its altitude. By changing altitude, the agent
+moves into different wind layers and exploits wind currents to navigate toward
+the target.
 
 Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) and [SB3-Contrib](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib). Vectorised environments collect rollouts in parallel, and the QR-DQN agent optimises a composite reward that balances proximity to the goal, approach direction, and penalties for crashes or leaving bounds. The best checkpoint is saved automatically when evaluation reward improves.
 
@@ -57,6 +72,7 @@ Run ONE of these options depending on your intention:
 - Core runtime: `pip install -e .`
 - Development tooling (recommended): `pip install -e .[dev]`
 - GPU-enabled training stack: `pip install -e .[dev,gpu]`
+- ERA5 download/preprocessing tooling: `pip install -e .[dev,weather]`
 
 ### Install the pre-commit hooks (required if you plan to commit)
 This repo enforces formatting (`black`), linting (`ruff`), and a few hygiene
@@ -89,7 +105,13 @@ python main.py --dim 3                        # Test QR-DQN in 3D (no --train = 
 python main.py --train --dim 1 --save_fig     # Train and save reward curve plot
 python main.py --train --dim 3 -g             # Train QR-DQN on GPU
 python main.py --train --dim 3 -g --hpc       # GPU training, no progress bar (for SLURM jobs)
+python main.py --train --dim 3 -g --hpc \
+  --weather-manifest weather_data/manifests/london-spring.json  # ERA5 training
 ```
+
+Weather assets are prepared offline and kept out of git. The short CDS
+download, conversion, and manifest commands are documented in
+[`notes/weather_pipeline.md`](notes/weather_pipeline.md).
 
 ### Accessing TensorBoard during training
 #### Local training

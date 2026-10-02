@@ -324,7 +324,7 @@ class TestStateConsistency:
 
         Indexed by name from ``agents.baselines.AMBIENT_IDX`` rather than by
         position: the original read ``obs[2]`` for a normalised altitude, an
-        index that under the frozen 143-wide layout is the wind column's
+        index that under the Layer 2 144-wide layout is the wind column's
         uncertainty channel.  A layout change should break the *import*, not
         silently compare against an unrelated field.
         """

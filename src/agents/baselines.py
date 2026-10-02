@@ -42,7 +42,7 @@ so they drop into the same evaluation loop as a trained ``QRDQN`` without any
 branching at the call site (see :mod:`agents.evaluation`).
 
 This module is also the agent-side single source of truth for the frozen
-observation layout (Layer 1 contract §1): every index lives in the constant
+observation layout (Layer 2 contract, roadmap §2.1): every index lives in the constant
 block below and nothing else in ``src/agents`` should hardcode an offset.
 """
 
@@ -51,7 +51,7 @@ from __future__ import annotations
 import numpy as np
 
 # --------------------------------------------------------------------------- #
-# Observation layout — Layer 1 contract §1. Width 143, identical for dim 1/2/3.
+# Observation layout — Layer 2 contract. Width 144, identical for dim 1/2/3.
 # --------------------------------------------------------------------------- #
 # The physics package owns these numbers; we mirror them so that `agents` stays
 # importable without the environment stack (numba, pygame, ...) — useful for
@@ -74,7 +74,7 @@ except ImportError:  # pragma: no cover - environment package unavailable
     WIND_COL_LEVELS = 41
     WIND_COL_SPACING = 250.0
     WIND_MAG_NORM = 30.0
-    OBS_WIDTH = 143
+    OBS_WIDTH = 144
     STATION_RADIUS = 10_000.0
     DIST_NORM = 100_000.0
     STATION_RADIUS_1D = 500.0
@@ -101,7 +101,7 @@ CH_UNCERTAINTY = 2  # STUB in Layer 1 (always 0.0); Layer 3 populates it
 #: but :class:`GreedyWindAgent` masks them outright so they can never be chosen.
 LIMIT_TRIPLE = (1.0, 1.0, 0.0)
 
-# --- ambient block: indices 123..142, 20 scalars in exactly this order.
+# --- ambient block: indices 123..143, 21 scalars in exactly this order.
 AMBIENT_START = WIND_COL_WIDTH
 AMBIENT_FIELDS: tuple[str, ...] = (
     "alt_norm",  # 123
@@ -124,6 +124,7 @@ AMBIENT_FIELDS: tuple[str, ...] = (
     "solar_elevation",  # 140  STUB (Layer 2)
     "solar_phase_sin",  # 141  STUB (Layer 2)
     "solar_phase_cos",  # 142  STUB (Layer 2)
+    "radiative_forcing_norm",  # 143  live with Layer 2.4 thermal forcing
 )
 AMBIENT_IDX: dict[str, int] = {
     name: AMBIENT_START + i for i, name in enumerate(AMBIENT_FIELDS)
@@ -149,6 +150,7 @@ IDX_RESOURCE_B_LOW = AMBIENT_IDX["resource_b_low"]
 IDX_SOLAR_ELEVATION = AMBIENT_IDX["solar_elevation"]
 IDX_SOLAR_PHASE_SIN = AMBIENT_IDX["solar_phase_sin"]
 IDX_SOLAR_PHASE_COS = AMBIENT_IDX["solar_phase_cos"]
+IDX_RADIATIVE_FORCING_NORM = AMBIENT_IDX["radiative_forcing_norm"]
 
 # --------------------------------------------------------------------------- #
 # Action layout — Discrete(3), matching `Balloon3DEnv._action_lut = [-1, 0, +1]`
@@ -176,7 +178,7 @@ def wind_column(obs: np.ndarray) -> np.ndarray:
 
 
 def ambient(obs: np.ndarray) -> np.ndarray:
-    """View of the 20 ambient scalars (indices 123..142)."""
+    """View of the 21 ambient scalars (indices 123..143)."""
     return np.asarray(obs)[..., AMBIENT_START:]
 
 
@@ -232,7 +234,7 @@ class BaselinePolicy:
         if obs.shape[-1] != OBS_WIDTH:
             raise ValueError(
                 f"{type(self).__name__} expects observations of width {OBS_WIDTH} "
-                f"(Layer 1 contract §1), got {obs.shape[-1]}."
+                f"(Layer 2 contract, roadmap §2.1), got {obs.shape[-1]}."
             )
         if obs.ndim == 1:
             return np.int64(self._action(obs)), None

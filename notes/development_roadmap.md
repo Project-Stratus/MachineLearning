@@ -52,7 +52,14 @@ Layers 1–2 are deterministic. Layer 3 is where the environment becomes genuine
 stochastic. Layer 4 is where it becomes ours specifically.
 
 **Where we are:** Layer 1 is closed out — trained and benchmarked, clearing its
-exit criterion. Layer 2 is next; see §9 for the open questions to settle first.
+exit criterion. Layer 2's ERA5 runtime, reanalysis atmosphere, date-split
+manifests, and radiative observation interface are implemented. The first real
+London pressure-level cube validates the end-to-end pipeline, but its four
+native levels in the 15–25 km flight band are too coarse for production policy
+training and its ±6° longitude extent is too narrow. The next data step is a
+wider ERA5 model-level corpus split into frozen manifests; the stateful
+day/night thermal model is the next code capability. See §4,
+`notes/weather_pipeline.md`, and `notes/era5_spike_2024-03-15.md`.
 
 ---
 
@@ -78,6 +85,15 @@ start and pinned to constants:
 | Safety flags (at altitude limit, etc.) | Live from Layer 1 | — |
 | Resource fractions | Live from Layer 1 | — |
 | Sensor-error indicators | Pinned to 0 | Layer 4 |
+| Net radiative forcing | Omitted (an oversight) | Layer 2.4 |
+
+**Layer 2 correction:** cloud-dependent thermal forcing was not representable
+in the 143-wide Layer 1 layout without making the supposedly fully observed
+Layer 2 environment partially observable. A signed `radiative_forcing_norm`
+scalar has therefore been added at index 143, making the Layer 2 contract 144
+wide. This deliberately invalidates Layer 1 checkpoints. Layer 2 already
+requires a weight retrain; the correction is made before that expensive run
+and is documented in `notes/weather_pipeline.md`.
 
 The wind column is the important case. **Layer 1 gives the agent a *perfect*
 column; Layer 3 degrades it to a *believed* one.** The layout is identical —
@@ -382,9 +398,19 @@ without crashing.
 
 ### 4.1 Wind field generation
 
-Already tracked in `todo.md` as the weather VAE. *Prior art:* Loon used ERA5
-reanalysis modified with Perlin-style procedural noise, varying the seed to
-generate unlimited scenarios; BLE ships a VAE for the same purpose.
+**Implementation foundation and first real-data spike complete.** ERA5
+reanalysis is the chosen Layer 2 truth source. Runtime workers consume
+preprocessed deterministic cubes through `ReanalysisWeatherProvider`; a custom
+VAE and ECMWF WeatherGenerator are not on the critical path. Download,
+geopotential-height conversion, four-dimensional interpolation, vertical-wind
+conversion, manifest selection and the analytic fallback are implemented. See
+`notes/weather_pipeline.md`. The 15 March 2024 London pressure-level spike
+validated the path but found only four native levels in the flight band and an
+insufficient east/west domain; see `notes/era5_spike_2024-03-15.md`.
+
+*Prior art:* Loon used ERA5 reanalysis modified with Perlin-style procedural
+noise, varying the seed to generate unlimited scenarios; BLE ships a VAE for
+the same purpose.
 
 Note the seed-varying procedural noise served two purposes for Loon —
 scenario generation *and* forecast-error emulation. Only the first belongs in
@@ -392,10 +418,15 @@ this layer; the second is Layer 3.
 
 ### 4.2 Real atmosphere
 
-- Ambient temperature and tropopause height from reanalysis rather than
-  two-layer ISA.
-- Extend ISA beyond two layers (`todo.md`).
-- Vertical wind component — currently `fz = 0` (`todo.md`).
+**Backend and pressure-level spike validated.** A reanalysis scenario supplies
+ambient temperature, pressure, density and vertical wind to observations and
+actual balloon dynamics. The accelerated integrator has a separate externally
+sampled weather path so it cannot silently use ISA. Production acquisition
+must use and validate model levels before training because pressure-level shear
+is vertically under-resolved.
+
+Extending ISA beyond two layers is no longer required for the Layer 2 backend;
+ISA remains an analytic fallback.
 
 ### 4.3 Geographic and seasonal diversity
 
@@ -407,6 +438,12 @@ a sanity check into a meaningful benchmark.
 altitudes), estimated 67% availability across the tropics from ~18,000
 gridpoints × hourly queries 2000–2019, and used it to *reject* impossible
 training scenarios — a useful idea for keeping the benchmark honest.
+
+**Manifest tooling implemented; population awaits real data.** Records are
+split by complete year, content-hashed, and stratified by transparent wind
+diversity/speed/shear features. London in March/April is the initial corpus.
+Baseline TWR must be added after the first real corpus is built; the current
+score is a stratification proxy, not a final definition of difficulty.
 
 ### 4.4 Day/night radiative thermal — end of Layer 2
 
@@ -423,6 +460,12 @@ Needed:
 - Radiative balance: direct solar, Earth IR, convective coupling to ambient.
 - Cloud cover modulating IR and direct solar, deterministic from reanalysis.
 - Un-pin the solar phase fields reserved in §2.1.
+
+Observability is now settled before this work begins: the 144th observation is
+signed net radiative forcing, shared by the thermal model and agent. At
+stratospheric altitude cloud primarily modifies upwelling longwave and
+reflected shortwave; direct-beam treatment should respect that geometry rather
+than applying surface-style cloud attenuation blindly.
 
 Then re-tune the resource penalty from §3.3 — a sunset that can force a hard
 ballast dump changes the economics of rationing substantially.

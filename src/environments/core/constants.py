@@ -48,7 +48,8 @@ WIND_COL_HALF_SPAN = 5000.0  # Half-span of the column (m) == 20 * SPACING
 WIND_MAG_NORM = 30.0  # Fixed wind-magnitude normaliser (m/s)
 
 # ----- OBSERVATION -----
-OBS_WIDTH = 143  # Frozen observation width (identical for dim 1/2/3)
+OBS_WIDTH = 144  # Layer 2 contract: adds observed net radiative forcing
+RADIATIVE_FORCING_NORM = 1_000.0  # W/m²; signed heating/cooling observation scale
 DIST_NORM = 100_000.0  # Horizontal distance normaliser (m)
 
 # ----- REWARD -----

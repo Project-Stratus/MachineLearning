@@ -2,7 +2,7 @@
 momentum-exploration subclass.
 
 Deliberately no training. `model.learn()` is never called — these tests verify
-that the model *builds* against the frozen 143-wide observation (Layer 1
+that the model *builds* against the 144-wide Layer 2 observation
 contract §1), that it predicts, and that the exploration path behaves. Whether
 the agent is any good is a question for `python main.py --benchmark`, not for
 the unit suite.
@@ -55,7 +55,7 @@ def vec_env():
 
 @pytest.fixture(scope="module")
 def model(vec_env):
-    """A real MomentumQRDQN on the real 143-wide observation space.
+    """A real MomentumQRDQN on the real 144-wide observation space.
 
     Module-scoped: building the four-layer policy is the expensive part and
     nothing here mutates the weights.
@@ -175,10 +175,10 @@ class TestSeedGuard:
 
 
 # --------------------------------------------------------------------------- #
-# The model builds and predicts against the frozen observation
+# The model builds and predicts against the Layer 2 observation contract
 # --------------------------------------------------------------------------- #
 class TestModelBuildsAgainstFrozenObservation:
-    def test_observation_space_is_143_wide(self, vec_env):
+    def test_observation_space_is_144_wide(self, vec_env):
         assert vec_env.observation_space.shape == (OBS_WIDTH,)
         assert vec_env.action_space.n == N_ACTIONS
 

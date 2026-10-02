@@ -14,6 +14,7 @@ from sb3_contrib import QRDQN
 
 import environments  # noqa: F401 -- side effect: registers the Balloon3D-v0 environment
 from environments.core.constants import DECISION_INTERVAL, TIME_MAX
+from environments.core.weather_scenarios import make_weather_scenario_set
 from environments.wrappers.decision_interval import DecisionIntervalWrapper
 from agents.baselines import baselines_for_dim, make_baseline
 from agents.evaluation import (
@@ -55,11 +56,12 @@ DECISIONS_PER_EPISODE = TIME_MAX // DECISION_INTERVAL
 # ---- Shared architecture (Loon-style QR-DQN — same for both balloon types) ----
 POLICY_KWARGS = dict(
     # Four hidden layers. The observation went 19 -> 143 when the wind column
-    # landed (Layer 1 contract §1), and roadmap §3.8 gates depth on exactly that:
+    # landed, then 143 -> 144 for observed radiative forcing (roadmap §2.1).
+    # Roadmap §3.8 gates depth on the input width:
     # Loon ablated depth directly and found performance still climbing at ~7
-    # layers — but against a 1,099-dim input. Scaled to our 143 dims, four
-    # layers is the proportionate step; revisit again when Layer 2 widens the
-    # column with real weather.
+    # layers — but against a 1,099-dim input. Scaled to our 144 dims, four
+    # layers is the proportionate step; revisit only if later observations
+    # materially widen the input.
     net_arch=[512, 512, 512, 512],
     activation_fn=torch.nn.ReLU,
     # Loon-style quantile head. Do NOT tune this yet: per roadmap §2.2 the
@@ -402,6 +404,7 @@ def train(
     balloon_type: str = "zero_pressure",
     momentum_exploration: bool = True,
     total_timesteps: int | None = None,
+    weather_manifest: str | None = None,
 ) -> pd.DataFrame:
     """
     Train QR-DQN on the balloon environment. Returns a DataFrame of episode returns/lengths.
@@ -446,6 +449,10 @@ def train(
                 f"total_timesteps must be positive, got {total_timesteps}."
             )
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
+    if weather_manifest is not None:
+        env_config.update(
+            {"weather_manifest": weather_manifest, "weather_split": "train"}
+        )
 
     n = n_envs if n_envs is not None else N_ENVS
     _check_train_seeds(SEED, n)
@@ -473,10 +480,20 @@ def train(
     # Held-out evaluation (roadmap §3.1). Scenario seeds come from a range
     # disjoint from the training seeds by construction, so these episodes are
     # genuinely unseen.
-    scenarios = make_scenario_set(
-        N_EVAL_SCENARIOS, seed=SCENARIO_SEED, held_out=True, config=env_config
-    )
-    eval_env = _build_eval_env(env_name, dim=dim, env_config=env_config)
+    if weather_manifest is None:
+        scenarios = make_scenario_set(
+            N_EVAL_SCENARIOS, seed=SCENARIO_SEED, held_out=True, config=env_config
+        )
+        eval_config = env_config
+    else:
+        scenarios = make_weather_scenario_set(
+            weather_manifest,
+            n=N_EVAL_SCENARIOS,
+            seed=SCENARIO_SEED,
+            held_out=True,
+        )
+        eval_config = {**env_config, "weather_split": "heldout"}
+    eval_env = _build_eval_env(env_name, dim=dim, env_config=eval_config)
 
     # SB3's own EvalCallback is deliberately not used: it evaluates on the
     # training config, selects on mean return, and would only duplicate the
@@ -526,7 +543,7 @@ def train(
 
     # Training summary
     evaluated = np.isfinite(twr_cb.best_twr)
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print("Training complete")
     print(f"  Balloon type:     {balloon_type}")
     print(
@@ -546,7 +563,7 @@ def train(
     )
     if hpc:
         print(f"  Device:           {device}")
-    print(f"{'='*50}\n")
+    print(f"{'=' * 50}\n")
     print("Compare against the baselines with:")
     print(f"  python main.py --benchmark --dim {dim} --balloon-type {balloon_type}\n")
 
@@ -563,6 +580,7 @@ def benchmark(
     use_gpu: bool = False,
     include_model: bool = True,
     scenario_seed: int = SCENARIO_SEED,
+    weather_manifest: str | None = None,
 ) -> dict:
     """Score every baseline (and the trained agent) on one held-out scenario set.
 
@@ -577,10 +595,20 @@ def benchmark(
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
     save_path = os.path.join(BASE_SAVE_PATH, balloon_type)
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
-
-    scenarios = make_scenario_set(
-        n_scenarios, seed=scenario_seed, held_out=True, config=env_config
-    )
+    if weather_manifest is None:
+        scenarios = make_scenario_set(
+            n_scenarios, seed=scenario_seed, held_out=True, config=env_config
+        )
+    else:
+        env_config.update(
+            {"weather_manifest": weather_manifest, "weather_split": "heldout"}
+        )
+        scenarios = make_weather_scenario_set(
+            weather_manifest,
+            n=n_scenarios,
+            seed=scenario_seed,
+            held_out=True,
+        )
     env = _build_eval_env(env_name, dim=dim, env_config=env_config)
 
     policies: dict[str, object] = {}
@@ -666,6 +694,7 @@ def test(
     use_gpu: bool = False,
     balloon_type: str = "zero_pressure",
     render_speed: float = 1.0,
+    weather_manifest: str | None = None,
 ) -> None:
     """
     Load the saved QR-DQN and run a few episodes with greedy actions.
@@ -694,6 +723,10 @@ def test(
             "(looked for best_twr_model.zip and qr_dqn.zip). Train one first."
         )
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
+    if weather_manifest is not None:
+        env_config.update(
+            {"weather_manifest": weather_manifest, "weather_split": "heldout"}
+        )
 
     # Human-render env for demo (shorter episode for interactive viewing)
     test_config = {
@@ -758,7 +791,7 @@ def test(
 
             c = info.get("reward_components", {})
             print(
-                f"E{episode+1:<2}|S{steps:>5}|A:{act:<3}"
+                f"E{episode + 1:<2}|S{steps:>5}|A:{act:<3}"
                 f"|Pos:{pos_str}"
                 f"|R:{reward:+8.3f}"
                 f"|dist:{info.get('distance', float('nan')):>9,.0f}"

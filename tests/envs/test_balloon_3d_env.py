@@ -25,6 +25,7 @@ from environments.core.constants import (
     BALLAST_INITIAL,
     DECISION_INTERVAL,
     MIN_START_DISTANCE,
+    P_MAX,
     RESOURCE_PENALTY_BASE,
     RESOURCE_PENALTY_SLOPE,
     SP_VOL_FIXED,
@@ -35,6 +36,8 @@ from environments.core.constants import (
     XY_MAX,
 )
 from environments.core.reward import l2_distance
+from environments.core.weather import ReanalysisAtmosphere, WeatherCube
+from environments.core.weather_scenarios import build_manifest
 from environments.envs.balloon_3d_env import (
     AMBIENT_IDX,
     WIND_COL_CHANNELS,
@@ -84,6 +87,96 @@ class TestBalloon3DEnvInitialization:
         assert env._norm_offsets.shape == (dim,)
         assert env._norm_scales.shape == (dim,)
         assert len(env._ranges) == dim
+
+
+class TestReanalysisWeatherIntegration:
+    @staticmethod
+    def _write_cube(path):
+        time = np.array([0.0, 43_200.0])
+        altitude = np.array([10_000.0, 20_000.0, 30_000.0])
+        y = x = np.array([-100_000.0, 0.0, 100_000.0])
+        shape = (2, 3, 3, 3)
+        WeatherCube(
+            time_s=time,
+            altitude_m=altitude,
+            y_m=y,
+            x_m=x,
+            u=np.full(shape, 12.0),
+            v=np.full(shape, -4.0),
+            w=np.full(shape, 0.25),
+            temperature=np.full(shape, 202.0),
+            pressure=np.full(shape, 6_000.0),
+            radiative_forcing=np.full(shape, -250.0),
+            metadata={"start_time_utc": "2024-03-15T00:00:00Z"},
+        ).save(path)
+
+    def test_weather_cube_drives_wind_atmosphere_and_observation(self, tmp_path):
+        path = tmp_path / "weather.npz"
+        self._write_cube(path)
+        env = make_env(
+            3,
+            weather_path=str(path),
+            randomise_scenario=False,
+            spawn_dist_range=(2_000.0, 2_000.0),
+        )
+        try:
+            obs, info = env.reset(seed=3)
+            assert isinstance(env._atmosphere, ReanalysisAtmosphere)
+            assert env._atmosphere.temperature(env._balloon.altitude) == pytest.approx(
+                202.0
+            )
+            assert obs[AMBIENT_IDX["pressure_norm"]] == pytest.approx(6_000.0 / P_MAX)
+            assert obs[AMBIENT_IDX["radiative_forcing_norm"]] == pytest.approx(-0.25)
+            assert info["scenario"]["wind_pattern"] == "era5"
+
+            env.step(1)
+            assert env.last_wind == pytest.approx([12.0, -4.0, 0.25])
+        finally:
+            env.close()
+
+    def test_one_dimensional_physics_receives_vertical_weather_wind(self, tmp_path):
+        path = tmp_path / "weather.npz"
+        self._write_cube(path)
+        env = make_env(1, weather_path=str(path), randomise_scenario=False)
+        try:
+            env.reset(seed=3)
+            env.step(1)
+            assert env.last_wind[2] == pytest.approx(0.25)
+            assert env._wind_vel_buf[0] == pytest.approx(0.25)
+        finally:
+            env.close()
+
+    def test_manifest_scenario_loads_and_verifies_its_cube(self, tmp_path):
+        path = tmp_path / "weather.npz"
+        manifest_path = tmp_path / "manifests" / "weather.json"
+        self._write_cube(path)
+        manifest = build_manifest(
+            [path], output_path=manifest_path, heldout_years={2024}
+        )
+
+        env = make_env(
+            3,
+            weather_manifest=str(manifest_path),
+            weather_split="heldout",
+            randomise_scenario=False,
+        )
+        try:
+            _obs, info = env.reset(
+                seed=3,
+                options={"weather_scenario_id": manifest.scenarios[0].scenario_id},
+            )
+            assert info["scenario"]["weather_split"] == "heldout"
+            assert info["scenario"]["weather_sha256"] == manifest.scenarios[0].sha256
+        finally:
+            env.close()
+
+        path.write_bytes(path.read_bytes() + b"changed")
+        with pytest.raises(ValueError, match="digest mismatch"):
+            make_env(
+                3,
+                weather_manifest=str(manifest_path),
+                weather_split="heldout",
+            )
 
 
 class TestWindColumnResolution:

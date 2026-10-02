@@ -39,6 +39,11 @@ class Atmosphere:
     Pressure and density follow from the hydrostatic equation and ideal gas law.
     """
 
+    # Only this analytic atmosphere may use the Numba kernel that embeds ISA.
+    # ReanalysisAtmosphere sets this false so dynamics cannot silently fall
+    # back to ISA while observations report real weather.
+    use_isa_numba = True
+
     def __init__(self, p0=P0, molar_mass=M_AIR):
         self.p0 = p0
         self.molar_mass = molar_mass

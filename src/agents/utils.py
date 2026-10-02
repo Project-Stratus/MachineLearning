@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - environment package unavailable
     ALT_SAFE_MIN, ALT_SAFE_MAX = 15_000.0, 25_000.0
     WIND_COL_SPACING = 250.0
 
-#: Observation index of `alt_norm` (Layer 1 contract §1). Read from the layout
+#: Observation index of `alt_norm` (Layer 2 contract, roadmap §2.1). Read from the layout
 #: table in `agents.baselines` rather than hardcoded — the layout has exactly
 #: one owner and this is not it.
 IDX_ALT_NORM = AMBIENT_IDX["alt_norm"]
@@ -72,13 +72,13 @@ class TerminationTracker(BaseCallback):
         total = sum(self.counts.values())
         if total == 0:
             return
-        print(f"\n{'='*55}")
+        print(f"\n{'=' * 55}")
         print(f"  Termination Breakdown ({total:,} episodes)")
-        print(f"{'='*55}")
+        print(f"{'=' * 55}")
         for reason, count in sorted(self.counts.items(), key=lambda x: -x[1]):
             pct = 100.0 * count / total
             print(f"  {reason:<45s} {count:>6,}  ({pct:5.1f}%)")
-        print(f"{'='*55}\n")
+        print(f"{'=' * 55}\n")
 
 
 class InfoProgressBar(ProgressBarCallback):

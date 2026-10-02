@@ -1,6 +1,6 @@
-"""Tests for the frozen observation layout (Layer 1 contract §1).
+"""Tests for the frozen observation layout (Layer 2 contract, roadmap §2.1).
 
-The layout is width 143 and **identical for dim 1, 2 and 3** — fields that are
+The Layer 2 layout is width 144 and **identical for dim 1, 2 and 3** — fields that are
 meaningless in a dimension are zeroed, never omitted, so that later layers can
 populate the stub fields in place without changing the network's input width
 (roadmap §2.1).  These tests pin that contract from the producing side; the
@@ -57,6 +57,7 @@ SIGNED_AMBIENT = (
     "heading_cos",
     "solar_phase_sin",
     "solar_phase_cos",
+    "radiative_forcing_norm",
 )
 
 
@@ -73,9 +74,9 @@ def level_altitude(z: float, i: int) -> float:
 class TestLayoutIsFrozen:
     """Width and index constants — the part that must never move."""
 
-    def test_width_is_143_for_every_dim(self, env_any_dim):
+    def test_width_is_144_for_every_dim(self, env_any_dim):
         env, dim = env_any_dim
-        assert env.observation_space.shape == (OBS_WIDTH,) == (143,)
+        assert env.observation_space.shape == (OBS_WIDTH,) == (144,)
         obs, _ = env.reset(seed=42)
         assert obs.shape == (expected_obs_size(dim),)
 
@@ -112,9 +113,11 @@ class TestLayoutIsFrozen:
             "solar_elevation",
             "solar_phase_sin",
             "solar_phase_cos",
+            "radiative_forcing_norm",
         )
         assert AMBIENT_IDX["alt_norm"] == 123
         assert AMBIENT_IDX["solar_phase_cos"] == 142
+        assert AMBIENT_IDX["radiative_forcing_norm"] == 143
 
     def test_agrees_with_agents_baselines(self):
         """The consumer's mirror of the layout must match this producer exactly.

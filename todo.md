@@ -7,12 +7,19 @@ a layer, it is cross-referenced.
 
 ## Known simplifications
 - [x] ~~Altitude-dependent gas temperature: replace constant T_BALLOON (20°C)~~ — done in §3.6. `T_BALLOON = 293.15 K` is gone; gas temperature is now `T_ambient(z) + SUPERHEAT_DAY` (15 K). The full radiative model is still Layer 2 §4.4.
-- [ ] Ambient temperature is still ISA, which §3.10 measured at **+16.1 K too warm** against tropical flight data — a bigger error than the superheat offset it carries. Launch latitude/season is now resolved (London, UK; early spring — roadmap §9), so this is unblocked; the fix is Layer 2 §4.2's reanalysis profiles pulled for that location/season. *Roadmap: §3.10.*
-- [ ] (Low priority) Add vertical wind component: the wind field currently has no vertical component (fz = 0). Stratospheric vertical winds are small but non-zero; adding them would improve realism. *Roadmap: Layer 2 §4.2.*
+- [x] ~~Acquire the first London early-spring ERA5 cube and validate pressure,
+  temperature, horizontal shear, converted vertical wind, size, and runtime.~~
+  The 15 March 2024 spike passes conversion/physics checks but exposes only
+  four native pressure surfaces in 15–25 km; production should use 137 model
+  levels. The ±6° box is also too narrow east/west. See
+  `notes/era5_spike_2024-03-15.md`. *Roadmap: Layer 2 §4.1–§4.2.*
 - [ ] (Low priority) Recompute volume at Verlet half-step: during integration, density is recomputed at the updated altitude but volume (V = nRT/P) is not. For DT=1s the error is negligible, but recomputing would make the two force evaluations fully consistent.
 - [ ] (Low priority) Extend ISA beyond two layers: the atmosphere model covers the troposphere and stratosphere only. Adding the mesosphere and above would allow operations beyond ~50 km, but is unnecessary for the current ~25 km ceiling. *Roadmap: Layer 2 §4.2 (superseded if we move to reanalysis profiles).*
 
 ## Layer 2 groundwork
+- [ ] Implement the stateful balloon-envelope energy balance and day/night
+  solar geometry. Feed it the observed net radiative forcing channel already
+  reserved in the 144-wide observation. *Roadmap: Layer 2 §4.4.*
 - [ ] **Verify ZP platform sizing against real hardware** (`PAYLOAD_MASS`, `BALLAST_INITIAL`, `VOL_MAX` in `constants.py`). Currently picked analytically to hit a target ceiling, not measured. Flagged in-code and in roadmap §9. Blocks finalising the ascent/spawn-altitude change below and, longer term, §3.6/§6.1.
 - [ ] Once the above lands, change `Balloon3DEnv.DEFAULTS["spawn_alt_range"]` from mid-band to hug `ALT_SAFE_MIN`, per the ascent decision in roadmap §9 (no ascent phase modelled; balloon starts near the bottom of the permitted band instead).
 - [ ] Retune mission geometry (`STATION_RADIUS`, `REWARD_HALFLIFE`, box size in `constants.py` / `Balloon3DEnv.DEFAULTS`) once Layer 2 scenarios exist to test against — provisional starting point (50 km radius, from Loon's own TWR50 definition) recorded in roadmap §9.
@@ -24,7 +31,9 @@ a layer, it is cross-referenced.
 Superseded by [`notes/development_roadmap.md`](notes/development_roadmap.md).
 The three items previously listed here map onto the layered plan as:
 
-- Weather VAE → **Layer 2** (§4.1)
+- Weather generation → **Layer 2** (§4.1); ERA5 catalogue replay is now the
+  chosen first implementation, with no VAE dependency unless measured scenario
+  coverage later proves inadequate
 - Sensor readings in place of the true wind vector → **Layer 4** (§6.1)
 - Real-world flight data → **Layer 1** §3.10 (validate the physics core against the
   Loon flight CSV) and **Layer 2** §4.3 (geographic and seasonal diversity)
