@@ -169,9 +169,9 @@ def rng():
 def expected_obs_size(dim: int) -> int:
     """Observation width for a given dimension.
 
-    The layout is frozen at :data:`OBS_WIDTH` (143) and is **identical** for
+    The Layer 2 layout is :data:`OBS_WIDTH` (144) and is **identical** for
     dim 1, 2 and 3 — fields meaningless in a dimension are zeroed, never
-    omitted (Layer 1 contract §1, roadmap §2.1).  The ``dim`` argument is
+    omitted (Layer 2 contract, roadmap §2.1). The ``dim`` argument is
     accepted only so call sites read naturally; it is deliberately ignored.
     """
     return OBS_WIDTH

@@ -30,6 +30,7 @@ from environments.core.constants import (
 try:
     from environments.core.jit_kernels import (
         physics_step_numba,
+        physics_step_weather_numba,
         density_numba,
     )
 
@@ -361,7 +362,8 @@ class Balloon:
 
         # Compute density at current altitude
         z = self.pos[-1]
-        if _JIT_OK:
+        use_isa_numba = bool(getattr(self.atmosphere, "use_isa_numba", False))
+        if _JIT_OK and use_isa_numba:
             rho_air = float(
                 density_numba(self.atmosphere.p0, self.atmosphere.molar_mass, z)
             )
@@ -369,7 +371,7 @@ class Balloon:
             rho_air = self.atmosphere.density(z)
         vol = self.dynamic_volume(t)
 
-        if _JIT_OK:
+        if _JIT_OK and use_isa_numba:
             physics_step_numba(
                 self.pos,
                 self.vel,
@@ -384,6 +386,21 @@ class Balloon:
                 VEL_MAX,
                 self.atmosphere.p0,
                 self.atmosphere.molar_mass,
+            )
+        elif _JIT_OK:
+            physics_step_weather_numba(
+                self.pos,
+                self.vel,
+                dt,
+                self.mass,
+                G,
+                rho_air,
+                float(self.atmosphere.temperature(z)),
+                vol,
+                wind_vel,
+                ext,
+                int(self.dim),
+                VEL_MAX,
             )
         else:
             self._verlet_step_py(dt, t, rho_air, vol, wind_vel, ext)

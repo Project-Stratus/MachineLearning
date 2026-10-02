@@ -67,6 +67,11 @@ gpu = [
   "nvidia-nvjitlink-cu12==12.8.93",
   "nvidia-nvtx-cu12==12.8.90",
 ]
+weather = [
+  "cdsapi>=0.7",
+  "xarray>=2025.1",
+  "netCDF4>=1.7",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = [

@@ -240,7 +240,13 @@ def evaluate_policy_twr(
         # *not* reset between scenarios: re-seeding `RandomAgent` every episode
         # would make it replay one identical action sequence across the whole set.
         # Run-level reproducibility comes from how the policy was constructed.
-        obs, _info = env.reset(seed=int(scenario["seed"]))
+        scenario_config = scenario.get("config", {})
+        reset_options = None
+        if "weather_scenario_id" in scenario_config:
+            reset_options = {
+                "weather_scenario_id": scenario_config["weather_scenario_id"]
+            }
+        obs, _info = env.reset(seed=int(scenario["seed"]), options=reset_options)
 
         done = False
         ep_return = 0.0

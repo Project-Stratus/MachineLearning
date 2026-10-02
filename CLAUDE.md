@@ -15,11 +15,11 @@ Amateur-scale project — **not** a Loon reimplementation. These constraints dri
 - Station-keeping geometry is still inherited from a scaled-down Loon rather than derived from our mission — an open question (roadmap §9). 3D uses a 10 km radius / 20 km half-life; 1D uses 500 m / 1 km, because reusing the horizontal scales made every 1D state a full-reward state and all baselines scored TWR 1.000.
 
 **Layer 1 is implemented, trained, and benchmarked — exit criterion met.** The
-trained agent clears the `greedy_wind` bar (below) by a wide margin on 3D.
-Held-out baselines (meta-seed 2026, **12** scenarios, ZP) — regenerate with
-`python main.py --benchmark --dim N` for current numbers, including the
-trained agent's, since that figure moves across training runs and is not
-tracked here:
+historical Layer 1 agent cleared the `greedy_wind` bar (below) by a wide margin
+on 3D. Layer 2 adds one radiative-forcing observation, so that 143-input
+checkpoint is intentionally incompatible with the current 144-input network
+and must be retrained. Held-out analytic baselines (meta-seed 2026, **12**
+scenarios, ZP) — regenerate with `python main.py --benchmark --dim N`:
 
 | policy | 1D | 2D | 3D |
 | --- | --- | --- | --- |
@@ -32,7 +32,12 @@ The bar is **dim-specific** and `qrdqn.baseline_reference(dim)` is the source of
 
 **1D is a debugging mode, not a test.** A two-parameter bang-bang holds station 92% of the time, so a 1D result says nothing about whether the agent learned anything. Judge Layer 1 on 3D against greedy_wind.
 
-Layer 2 is next — see `notes/development_roadmap.md` §9 for the open questions to settle first.
+Layer 2's ERA5 runtime foundation (roadmap §4.1–§4.3) and radiative-observation
+decision (§4.4 interface) are implemented. Real CDS cubes and their validation
+have begun: the first pressure-level spike validates the pipeline but is too
+vertically coarse for production, so model-level acquisition is required
+before weather training. See `notes/weather_pipeline.md` and
+`notes/era5_spike_2024-03-15.md`.
 
 Google Loon is used as **prior art for validation**, not as the thing being replicated. When citing it, frame it as evidence a design works at scale rather than as the reason to adopt it.
 
@@ -40,7 +45,11 @@ Google Loon is used as **prior art for validation**, not as the thing being repl
 
 Work is staged into five layers, each independently trainable and measurable before the next begins: deterministic basics → deterministic weather (day/night at the end) → uncertainty → hardware → deferred long-duration SP. See `notes/development_roadmap.md`.
 
-**Before changing the observation space, read roadmap §2.1.** The layout is meant to be frozen early with later-layer fields present but stubbed at constants (uncertainty channels at 0, solar phase fixed, sensor-error indicators at 0), so that crossing a layer boundary costs a retrain of weights rather than a re-architecture.
+**Before changing the observation space, read roadmap §2.1.** The Layer 2
+contract is now frozen at 144 values, including net radiative forcing. Later
+fields are present but stubbed at constants (uncertainty channels at 0, solar
+phase fixed, sensor-error indicators at 0), so later layers should cost a
+retrain of weights rather than another re-architecture.
 
 Also worth knowing (roadmap §2.2): Layers 1–2 are deterministic, so the return distribution from any state-action pair is a point mass and QR-DQN's quantiles carry no information. Distributional RL earns nothing until Layer 3 — don't tune `n_quantiles` before then, and don't read a null result there as a bug.
 
@@ -50,6 +59,7 @@ Also worth knowing (roadmap §2.2): Layers 1–2 are deterministic, so the retur
 ```bash
 pip install -e .[dev]        # Development (recommended)
 pip install -e .[dev,gpu]    # GPU-enabled training
+pip install -e .[dev,weather] # ERA5 download/preprocessing tools
 ```
 
 ### Testing
@@ -64,6 +74,7 @@ python tests/check_install.py --build --pip-check  # Smoke test
 python main.py --train --dim 1    # Train QR-DQN in 1D
 python main.py --train --dim 2    # Train QR-DQN in 2D
 python main.py --dim 3            # Test QR-DQN in 3D (no --train = inference)
+python main.py --train --dim 3 --weather-manifest weather_data/manifests/london-spring.json
 ```
 
 ### Code Quality

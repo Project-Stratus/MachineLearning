@@ -10,7 +10,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
-
     # Args
     parser = argparse.ArgumentParser(
         description="Train or Run a QR-DQN agent on our Loon Environment."
@@ -88,6 +87,13 @@ if __name__ == "__main__":
         help="Playback speed multiplier for --dim render mode (no --train). "
         "1.0 is ~1 decision/second (real-time-feeling); 4.0 is ~4/second.",
     )
+    parser.add_argument(
+        "--weather-manifest",
+        type=str,
+        default=None,
+        help="Layer 2 ERA5 scenario manifest. Training uses its train split; "
+        "benchmark/inference use heldout.",
+    )
     args = parser.parse_args()
 
     if args.benchmark:
@@ -96,6 +102,7 @@ if __name__ == "__main__":
             balloon_type=args.balloon_type,
             n_scenarios=args.n_scenarios,
             use_gpu=args.gpu,
+            weather_manifest=args.weather_manifest,
         )
     elif args.train:
         df = qrdqn.train(
@@ -106,6 +113,7 @@ if __name__ == "__main__":
             balloon_type=args.balloon_type,
             momentum_exploration=not args.no_momentum,
             total_timesteps=args.timesteps,
+            weather_manifest=args.weather_manifest,
         )
         if args.save_fig:
             save_dir = f"src/models/qr_dqn_model/{args.balloon_type}"
@@ -177,4 +185,5 @@ if __name__ == "__main__":
             use_gpu=args.gpu,
             balloon_type=args.balloon_type,
             render_speed=args.render_speed,
+            weather_manifest=args.weather_manifest,
         )

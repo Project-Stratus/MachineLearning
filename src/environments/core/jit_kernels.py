@@ -208,7 +208,7 @@ def _compute_drag(
     rho_air: float,
     area: float,
     diameter: float,
-    alt: float,
+    temperature: float,
     n_dim: int,
 ) -> (float, float, float):
     """
@@ -231,7 +231,12 @@ def _compute_drag(
     rel_speed = math.sqrt(rel_speed2)
     inv_rel_speed = 1.0 / rel_speed
 
-    mu = dynamic_viscosity_numba(alt)
+    mu = (
+        _MU_REF
+        * (temperature / _T_REF) ** 1.5
+        * (_T_REF + _S_SUTH)
+        / (temperature + _S_SUTH)
+    )
     Re = rho_air * rel_speed * diameter / mu
     cd = morrison_cd(Re)
     f_mag = 0.5 * cd * area * rho_air * rel_speed2
@@ -251,15 +256,14 @@ def _compute_accel(
     volume: float,
     area: float,
     diameter: float,
+    temperature: float,
     n_dim: int,
     accel_out: np.ndarray,
 ) -> None:
     """Compute per-axis acceleration into *accel_out* (pre-allocated)."""
     z_idx = n_dim - 1
-    alt = pos[z_idx]
-
     f_mag, rel_speed, inv_rel_speed = _compute_drag(
-        vel, wind_vel, rho_air, area, diameter, alt, n_dim
+        vel, wind_vel, rho_air, area, diameter, temperature, n_dim
     )
     have_rel = rel_speed > 1e-12
 
@@ -326,6 +330,7 @@ def physics_step_numba(
         volume,
         area,
         diameter,
+        temperature_numba(pos[z_idx]),
         n_dim,
         a_old,
     )
@@ -351,6 +356,7 @@ def physics_step_numba(
         volume,
         area,
         diameter,
+        temperature_numba(pos[z_idx]),
         n_dim,
         a_new,
     )
@@ -366,6 +372,86 @@ def physics_step_numba(
         vel[i] = vi
 
     # Ground clamp
+    if pos[z_idx] < 0.0:
+        pos[z_idx] = 0.0
+        vel[z_idx] = 0.0
+
+
+@njit(cache=True, fastmath=True)
+def physics_step_weather_numba(
+    pos: np.ndarray,
+    vel: np.ndarray,
+    dt: float,
+    mass: float,
+    G: float,
+    rho_air: float,
+    ambient_temperature: float,
+    volume: float,
+    wind_vel: np.ndarray,
+    external_force: np.ndarray,
+    n_dim: int,
+    vel_max: float,
+) -> None:
+    """Velocity-Verlet step using an externally sampled atmosphere.
+
+    Weather is held constant across this one-second integration step, just as
+    wind and volume already are. A fresh reanalysis sample is supplied on the
+    next step. Keeping this kernel separate prevents Layer 2 dynamics from
+    falling back to the hard-coded ISA helpers above.
+    """
+
+    z_idx = n_dim - 1
+    area = sphere_area_from_volume(volume)
+    radius = (volume / _FOUR_THIRDS_PI) ** (1.0 / 3.0)
+    diameter = 2.0 * radius
+
+    a_old = np.empty(n_dim, dtype=np.float64)
+    _compute_accel(
+        pos,
+        vel,
+        wind_vel,
+        external_force,
+        mass,
+        G,
+        rho_air,
+        volume,
+        area,
+        diameter,
+        ambient_temperature,
+        n_dim,
+        a_old,
+    )
+
+    half_dt2 = 0.5 * dt * dt
+    for i in range(n_dim):
+        pos[i] += vel[i] * dt + a_old[i] * half_dt2
+
+    a_new = np.empty(n_dim, dtype=np.float64)
+    _compute_accel(
+        pos,
+        vel,
+        wind_vel,
+        external_force,
+        mass,
+        G,
+        rho_air,
+        volume,
+        area,
+        diameter,
+        ambient_temperature,
+        n_dim,
+        a_new,
+    )
+
+    half_dt = 0.5 * dt
+    for i in range(n_dim):
+        value = vel[i] + (a_old[i] + a_new[i]) * half_dt
+        if value > vel_max:
+            value = vel_max
+        elif value < -vel_max:
+            value = -vel_max
+        vel[i] = value
+
     if pos[z_idx] < 0.0:
         pos[z_idx] = 0.0
         vel[z_idx] = 0.0
