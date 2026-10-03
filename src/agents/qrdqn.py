@@ -391,6 +391,26 @@ def _resolve_model_path(save_path: str) -> str | None:
     return None
 
 
+def model_save_path(balloon_type: str, weather_manifest: str | None = None) -> str:
+    """Return the checkpoint directory for analytic or ERA5 training.
+
+    Layer 2 changes the observation contract and requires retraining. Keeping
+    its checkpoints under an ``era5`` subdirectory prevents a smoke run or
+    production weather run from overwriting the Phase 1 analytic-wind model.
+    """
+
+    path = os.path.join(BASE_SAVE_PATH, balloon_type)
+    return os.path.join(path, "era5") if weather_manifest is not None else path
+
+
+def _model_matches_env(model: object, env: gym.Env) -> bool:
+    """Whether a loaded checkpoint accepts this environment's observations."""
+
+    model_shape = getattr(getattr(model, "observation_space", None), "shape", None)
+    env_shape = getattr(getattr(env, "observation_space", None), "shape", None)
+    return model_shape is not None and tuple(model_shape) == tuple(env_shape or ())
+
+
 # --------------------------------------------------------------------------- #
 # Training
 # --------------------------------------------------------------------------- #
@@ -405,6 +425,7 @@ def train(
     momentum_exploration: bool = True,
     total_timesteps: int | None = None,
     weather_manifest: str | None = None,
+    n_eval_scenarios: int = N_EVAL_SCENARIOS,
 ) -> pd.DataFrame:
     """
     Train QR-DQN on the balloon environment. Returns a DataFrame of episode returns/lengths.
@@ -425,6 +446,10 @@ def train(
     :data:`EVAL_FREQ` would never fire, the evaluation cadence is compressed so
     a pilot still exercises the eval and best-checkpoint paths — a smoke test
     that skips the very machinery it is meant to smoke-test is worthless.
+
+    ``n_eval_scenarios`` defaults to the production benchmark size. Set it to
+    one only for the two-cube ERA5 smoke test; production training must restore
+    the default held-out set.
     """
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -437,7 +462,7 @@ def train(
     )
 
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
-    save_path = os.path.join(BASE_SAVE_PATH, balloon_type)
+    save_path = model_save_path(balloon_type, weather_manifest)
     model_path = os.path.join(save_path, "qr_dqn")
     train_cfg = _TRAIN_CFG[balloon_type]
     if total_timesteps is None:
@@ -448,6 +473,9 @@ def train(
             raise ValueError(
                 f"total_timesteps must be positive, got {total_timesteps}."
             )
+    n_eval_scenarios = int(n_eval_scenarios)
+    if n_eval_scenarios <= 0:
+        raise ValueError(f"n_eval_scenarios must be positive, got {n_eval_scenarios}.")
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
     if weather_manifest is not None:
         env_config.update(
@@ -482,13 +510,16 @@ def train(
     # genuinely unseen.
     if weather_manifest is None:
         scenarios = make_scenario_set(
-            N_EVAL_SCENARIOS, seed=SCENARIO_SEED, held_out=True, config=env_config
+            n_eval_scenarios,
+            seed=SCENARIO_SEED,
+            held_out=True,
+            config=env_config,
         )
         eval_config = env_config
     else:
         scenarios = make_weather_scenario_set(
             weather_manifest,
-            n=N_EVAL_SCENARIOS,
+            n=n_eval_scenarios,
             seed=SCENARIO_SEED,
             held_out=True,
         )
@@ -557,6 +588,7 @@ def train(
         else f"  Eval every:       {EVAL_FREQ:,} env steps"
     )
     print(f"  Total timesteps:  {model.num_timesteps:,} / {total_timesteps:,}")
+    print(f"  Eval scenarios:   {n_eval_scenarios}")
     print(f"  Model saved to:   {os.path.abspath(model_path)}")
     print(
         f"  Best-TWR model:   {os.path.abspath(os.path.join(save_path, 'best_twr_model'))}"
@@ -565,7 +597,12 @@ def train(
         print(f"  Device:           {device}")
     print(f"{'=' * 50}\n")
     print("Compare against the baselines with:")
-    print(f"  python main.py --benchmark --dim {dim} --balloon-type {balloon_type}\n")
+    benchmark_command = (
+        f"python main.py --benchmark --dim {dim} --balloon-type {balloon_type}"
+    )
+    if weather_manifest is not None:
+        benchmark_command += f" --weather-manifest {weather_manifest}"
+    print(f"  {benchmark_command}\n")
 
     return _gather_monitor_csvs(save_path)
 
@@ -593,7 +630,7 @@ def benchmark(
     Returns ``{policy_name: results_dict}`` from :func:`evaluate_policy_twr`.
     """
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
-    save_path = os.path.join(BASE_SAVE_PATH, balloon_type)
+    save_path = model_save_path(balloon_type, weather_manifest)
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
     if weather_manifest is None:
         scenarios = make_scenario_set(
@@ -629,8 +666,19 @@ def benchmark(
                 if (use_gpu and torch.cuda.is_available())
                 else torch.device("cpu")
             )
-            policies["qr_dqn"] = QRDQN.load(model_path, device=device)
-            print(f"Loaded agent from {os.path.abspath(model_path)}.zip")
+            model = QRDQN.load(model_path, device=device)
+            if _model_matches_env(model, env):
+                policies["qr_dqn"] = model
+                print(f"Loaded agent from {os.path.abspath(model_path)}.zip")
+            else:
+                model_shape = getattr(model.observation_space, "shape", None)
+                env_shape = getattr(env.observation_space, "shape", None)
+                print(
+                    f"Skipping incompatible checkpoint at "
+                    f"{os.path.abspath(model_path)}.zip: model observations "
+                    f"{model_shape}, environment observations {env_shape}. Retrain "
+                    "for this phase before comparing the agent."
+                )
 
     results: dict[str, dict] = {}
     for name, policy in policies.items():
@@ -665,13 +713,15 @@ def _print_benchmark_table(
     print(f"\n{header}")
     print("=" * len(header))
     print(
-        f"{'policy':<14s}{'TWR':>8s}{'mean return':>14s}{'final dist (m)':>17s}{'ep len':>9s}"
+        f"{'policy':<14s}{'TWR':>8s}{'mean return':>14s}{'final dist (m)':>17s}"
+        f"{'ep len':>9s}{'clip %':>9s}"
     )
     print("-" * len(header))
     for name, r in results.items():
         print(
             f"{name:<14s}{r['twr']:>8.3f}{r['mean_return']:>14.1f}"
             f"{r['mean_final_distance']:>17,.0f}{r['mean_episode_length']:>9.1f}"
+            f"{100.0 * r.get('mean_weather_clipped_fraction', 0.0):>9.2f}"
         )
     print("-" * len(header))
 
@@ -715,7 +765,7 @@ def test(
     )
 
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
-    save_path = os.path.join(BASE_SAVE_PATH, balloon_type)
+    save_path = model_save_path(balloon_type, weather_manifest)
     model_path = _resolve_model_path(save_path)
     if model_path is None:
         raise FileNotFoundError(

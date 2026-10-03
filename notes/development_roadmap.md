@@ -53,13 +53,14 @@ stochastic. Layer 4 is where it becomes ours specifically.
 
 **Where we are:** Layer 1 is closed out — trained and benchmarked, clearing its
 exit criterion. Layer 2's ERA5 runtime, reanalysis atmosphere, date-split
-manifests, and radiative observation interface are implemented. The first real
-London pressure-level cube validates the end-to-end pipeline, but its four
-native levels in the 15–25 km flight band are too coarse for production policy
-training and its ±6° longitude extent is too narrow. The next data step is a
-wider ERA5 model-level corpus split into frozen manifests; the stateful
-day/night thermal model is the next code capability. See §4,
-`notes/weather_pipeline.md`, and `notes/era5_spike_2024-03-15.md`.
+manifests, radiative observation interface, and production-source data path are
+implemented. The 15 April 2021 London pilot validates all 137 ERA5 model
+levels, same-date pressure-level agreement, 25 native levels in the 15–25 km
+flight band, the ±10° domain, worker memory, and full 12-hour simulations. The
+next data step is the sampled 2010–2025 corpus and frozen manifest; the next
+independent code capability is the stateful day/night thermal model. See §4,
+`notes/weather_pipeline.md`, and
+`notes/era5_model_level_spike_2021-04-15.md`.
 
 ---
 
@@ -398,15 +399,16 @@ without crashing.
 
 ### 4.1 Wind field generation
 
-**Implementation foundation and first real-data spike complete.** ERA5
+**Implementation foundation and model-level pilot complete.** ERA5
 reanalysis is the chosen Layer 2 truth source. Runtime workers consume
 preprocessed deterministic cubes through `ReanalysisWeatherProvider`; a custom
 VAE and ECMWF WeatherGenerator are not on the critical path. Download,
 geopotential-height conversion, four-dimensional interpolation, vertical-wind
 conversion, manifest selection and the analytic fallback are implemented. See
-`notes/weather_pipeline.md`. The 15 March 2024 London pressure-level spike
-validated the path but found only four native levels in the flight band and an
-insufficient east/west domain; see `notes/era5_spike_2024-03-15.md`.
+`notes/weather_pipeline.md`. The 15 March 2024 pressure-level spike found the
+vertical-resolution and domain limits; the 15 April 2021 model-level pilot
+resolves both with 25 native flight-band levels and a zero-clipping ±10° box.
+See `notes/era5_model_level_spike_2021-04-15.md`.
 
 *Prior art:* Loon used ERA5 reanalysis modified with Perlin-style procedural
 noise, varying the seed to generate unlimited scenarios; BLE ships a VAE for
@@ -418,12 +420,12 @@ this layer; the second is Layer 3.
 
 ### 4.2 Real atmosphere
 
-**Backend and pressure-level spike validated.** A reanalysis scenario supplies
+**Backend and model-level source validated.** A reanalysis scenario supplies
 ambient temperature, pressure, density and vertical wind to observations and
 actual balloon dynamics. The accelerated integrator has a separate externally
-sampled weather path so it cannot silently use ISA. Production acquisition
-must use and validate model levels before training because pressure-level shear
-is vertically under-resolved.
+sampled weather path so it cannot silently use ISA. Production acquisition now
+uses the validated ERA5 L137 model-level path; the pressure-level product
+remains a conversion check rather than training truth.
 
 Extending ISA beyond two layers is no longer required for the Layer 2 backend;
 ISA remains an analytic fallback.
@@ -442,6 +444,8 @@ training scenarios — a useful idea for keeping the benchmark honest.
 **Manifest tooling implemented; population awaits real data.** Records are
 split by complete year, content-hashed, and stratified by transparent wind
 diversity/speed/shear features. London in March/April is the initial corpus.
+The frozen held-out years are 2019–2021 to overlap the mature Google/Loon
+flight record, including the locally available Q2-2021 telemetry.
 Baseline TWR must be added after the first real corpus is built; the current
 score is a stratification proxy, not a final definition of difficulty.
 

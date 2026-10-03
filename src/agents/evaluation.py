@@ -215,9 +215,12 @@ def evaluate_policy_twr(
     -------
     dict
         ``twr`` (mean per-episode TWR), ``mean_return``, ``mean_final_distance``,
-        ``termination_counts``, ``n_episodes``, plus the per-episode breakdown
-        (``episode_twr``, ``episode_returns``, ``episode_lengths``), the
-        step-weighted ``twr_pooled`` and the ``horizon`` used.
+        ``mean_weather_clipped_fraction``, ``termination_counts``,
+        ``n_episodes``, plus the per-episode breakdown (``episode_twr``,
+        ``episode_returns``, ``episode_lengths``,
+        ``episode_weather_clipped_fraction``), the step-weighted ``twr_pooled``
+        and the ``horizon`` used. Environments without clipping telemetry are
+        treated as having zero clipping.
     """
     # The radius must match the one the env rewards against, or the metric and
     # the reward disagree.  1-D uses a much tighter altitude tolerance, so
@@ -233,6 +236,7 @@ def evaluate_policy_twr(
     episode_in_radius: list[int] = []
     final_distances: list[float] = []
     all_distances: list[float] = []
+    episode_weather_clipped_fraction: list[float] = []
     termination_counts: Counter[str] = Counter()
 
     for scenario in scenarios:
@@ -274,6 +278,9 @@ def evaluate_policy_twr(
             float(ep_distances[-1]) if ep_distances else float("nan")
         )
         all_distances.extend(ep_distances)
+        episode_weather_clipped_fraction.append(
+            float(info.get("weather_clipped_fraction", 0.0))
+        )
         termination_counts[_termination_reason(info, terminated, truncated)] += 1
 
     n_episodes = len(episode_returns)
@@ -286,9 +293,11 @@ def evaluate_policy_twr(
             "n_episodes": 0,
             "twr_pooled": 0.0,
             "mean_episode_length": 0.0,
+            "mean_weather_clipped_fraction": 0.0,
             "episode_twr": [],
             "episode_returns": [],
             "episode_lengths": [],
+            "episode_weather_clipped_fraction": [],
             "horizon": 0,
         }
 
@@ -313,9 +322,13 @@ def evaluate_policy_twr(
         "n_episodes": n_episodes,
         "twr_pooled": float(time_within_radius(all_distances, station_radius)),
         "mean_episode_length": float(np.mean(episode_lengths)),
+        "mean_weather_clipped_fraction": float(
+            np.mean(episode_weather_clipped_fraction)
+        ),
         "episode_twr": episode_twr,
         "episode_returns": episode_returns,
         "episode_lengths": episode_lengths,
+        "episode_weather_clipped_fraction": episode_weather_clipped_fraction,
         "horizon": horizon,
     }
 
@@ -332,8 +345,9 @@ class TWREvalCallback(BaseCallback):
     dropoffs are retuned, so "best return" checkpoints are not comparable across
     runs. TWR is fixed by the mission definition, so it is.
 
-    Logs ``eval/twr`` and ``eval/mean_return`` (plus ``eval/mean_final_distance``
-    and ``eval/mean_ep_length``) to TensorBoard.
+    Logs ``eval/twr`` and ``eval/mean_return`` (plus
+    ``eval/mean_final_distance``, ``eval/mean_ep_length`` and
+    ``eval/mean_weather_clipped_fraction``) to TensorBoard.
 
     Parameters
     ----------
@@ -450,6 +464,10 @@ class TWREvalCallback(BaseCallback):
             "eval/mean_final_distance", float(results["mean_final_distance"])
         )
         self.logger.record("eval/mean_ep_length", float(results["mean_episode_length"]))
+        self.logger.record(
+            "eval/mean_weather_clipped_fraction",
+            float(results["mean_weather_clipped_fraction"]),
+        )
         self.logger.record(
             "time/total_timesteps", self.num_timesteps, exclude="tensorboard"
         )

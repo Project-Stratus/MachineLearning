@@ -38,8 +38,10 @@ ALT_SAFE_MAX = 25_000.0  # Upper operational limit (m)
 
 # ----- HORIZONTAL BOUNDS -----
 # Soft bounds: there is no distance termination.  XY_ABORT exists purely as a
-# numerical runaway guard.
-XY_ABORT = 500_000.0  # Abort if |x| or |y| exceeds this (m)
+# numerical runaway guard.  It must sit beyond the farthest displacement a
+# velocity-clamped balloon can achieve in the default 12-hour episode; 500 km
+# was reached by ordinary ERA5 winds and incorrectly truncated valid flights.
+XY_ABORT = 10_000_000.0  # Abort if |x| or |y| exceeds this (m)
 
 # ----- WIND COLUMN OBSERVATION -----
 WIND_COL_LEVELS = 41  # Number of altitude levels in the wind column

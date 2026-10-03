@@ -113,6 +113,50 @@ Weather assets are prepared offline and kept out of git. The short CDS
 download, conversion, and manifest commands are documented in
 [`notes/weather_pipeline.md`](notes/weather_pipeline.md).
 
+### Phase 2 ERA5 smoke test on the HPC
+
+Acquisition is plan-only unless `--execute` is explicit. Run the smoke profile
+on an HPC login/data-transfer node with CDS credentials and outbound network
+access—not inside the training job:
+
+```bash
+python scripts/acquire_era5_corpus.py --profile smoke --plan
+python scripts/acquire_era5_corpus.py --profile smoke --execute
+
+python scripts/plot_weather_cube.py \
+  --input weather_data/cubes/london-2018-04-15T00-model-levels.npz \
+  --output weather_data/plots/london-2018-04-15.png
+
+sbatch jobscripts/train_phase2_era5_slurm.sh
+```
+
+The smoke profile contains one 2018 training cube and one held-out 2021 cube.
+The job trains for 60,000 steps with one evaluation scenario, which crosses the
+50,000-step learning warm-up and exercises gradient updates, held-out
+evaluation, checkpointing, and TensorBoard. ERA5 checkpoints are written under
+`src/models/qr_dqn_model/<balloon_type>/era5/`; they cannot overwrite Phase 1.
+After the job completes, benchmark its checkpoint on the held-out smoke cube:
+
+```bash
+python main.py --benchmark --dim 3 --balloon-type zero_pressure \
+  --n-scenarios 1 \
+  --weather-manifest weather_data/manifests/london-smoke.json
+```
+
+Once the smoke test passes, prepare the initial 128-scenario corpus with:
+
+```bash
+python scripts/acquire_era5_corpus.py --profile sampled --plan
+python scripts/acquire_era5_corpus.py --profile sampled --execute
+```
+
+Then update `jobscripts/train_phase2_era5_slurm.sh` as directed in its header:
+use `london-spring.json`, restore 12 evaluation scenarios, choose the production
+worker count, remove the 60,000-step override, and increase the two-hour
+walltime using the measured smoke runtime. Benchmark the resulting checkpoint
+with the same command using `london-spring.json` and 12 scenarios. Phase 1
+analytic training is kept separately in `jobscripts/train_phase1_slurm.sh`.
+
 ### Accessing TensorBoard during training
 #### Local training
 1. Run `tensorboard --logdir ./src/models/ --port 6006` in your terminal during training to view logs for all agents.

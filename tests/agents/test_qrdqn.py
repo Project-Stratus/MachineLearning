@@ -9,6 +9,7 @@ the unit suite.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
@@ -338,6 +339,20 @@ class TestMomentumWiring:
 # Evaluation / benchmark wiring
 # --------------------------------------------------------------------------- #
 class TestBenchmarkWiring:
+    def test_phase2_checkpoints_are_isolated_from_phase1(self):
+        phase1 = qrdqn.model_save_path("zero_pressure")
+        phase2 = qrdqn.model_save_path(
+            "zero_pressure", "weather_data/manifests/london-smoke.json"
+        )
+        assert Path(phase2) == Path(phase1) / "era5"
+
+    def test_checkpoint_observation_shape_must_match_environment(self):
+        env = SimpleNamespace(observation_space=SimpleNamespace(shape=(144,)))
+        compatible = SimpleNamespace(observation_space=SimpleNamespace(shape=(144,)))
+        obsolete = SimpleNamespace(observation_space=SimpleNamespace(shape=(143,)))
+        assert qrdqn._model_matches_env(compatible, env)
+        assert not qrdqn._model_matches_env(obsolete, env)
+
     def test_resolve_model_path_prefers_best_twr(self, tmp_path):
         (tmp_path / "qr_dqn.zip").write_bytes(b"")
         assert qrdqn._resolve_model_path(str(tmp_path)).endswith("qr_dqn")
@@ -427,6 +442,21 @@ class TestTimestepOverride:
         monkeypatch.setattr(qrdqn, "_build_vec_env", boom)
         with pytest.raises(ValueError, match="total_timesteps must be positive"):
             qrdqn.train(dim=3, total_timesteps=bad)
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_rejects_non_positive_eval_scenario_count(self, bad, monkeypatch):
+        def boom(*args, **kwargs):
+            raise AssertionError("built the env despite an invalid eval count")
+
+        monkeypatch.setattr(qrdqn, "_build_vec_env", boom)
+        with pytest.raises(ValueError, match="n_eval_scenarios must be positive"):
+            qrdqn.train(dim=3, total_timesteps=10, n_eval_scenarios=bad)
+
+    def test_eval_scenario_count_defaults_to_production_set(self):
+        import inspect
+
+        parameter = inspect.signature(qrdqn.train).parameters["n_eval_scenarios"]
+        assert parameter.default == qrdqn.N_EVAL_SCENARIOS
 
     def test_cli_exposes_the_flag(self):
         """main.py is the only entry point most runs go through."""

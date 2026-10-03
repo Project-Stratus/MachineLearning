@@ -472,6 +472,8 @@ class Balloon3DEnv(gym.Env):
         self._is_reanalysis = bool(
             cfg.get("weather_path") or cfg.get("weather_manifest")
         )
+        self._weather_clipped = False
+        self._weather_clipped_steps = 0
 
         if cfg.get("weather_manifest"):
             self._weather_manifest = WeatherScenarioManifest.load(
@@ -965,6 +967,8 @@ class Balloon3DEnv(gym.Env):
         self._at_alt_max = False
         self._omega = 0.0
         self._omega_steps = 0
+        self._weather_clipped = False
+        self._weather_clipped_steps = 0
         self.prev_action = ACTION_STAY
 
         if options and options.get("weather_scenario_id") is not None:
@@ -1215,7 +1219,14 @@ class Balloon3DEnv(gym.Env):
         omega = self._charge_resources(self._actuate(effect))
 
         self._set_weather_context(self._balloon.pos, float(self._time) * DT)
-        wind = self.wind.sample(*self._full_coords(self._balloon.pos))
+        full_coords = self._full_coords(self._balloon.pos)
+        self._weather_clipped = bool(
+            self._is_reanalysis
+            and not self.wind.contains_horizontal(full_coords[0], full_coords[1])
+        )
+        if self._weather_clipped:
+            self._weather_clipped_steps += 1
+        wind = self.wind.sample(*full_coords)
         self.last_wind[:] = wind  # Cache for obs (copies before buffer reuse)
 
         # Build wind velocity vector for relative-velocity drag
@@ -1261,9 +1272,10 @@ class Balloon3DEnv(gym.Env):
             # Soft horizontal bounds: no distance termination at all, so the
             # agent can discover that riding an unfavourable wind out and back
             # is worth it.  XY_ABORT only catches numerical runaway.
+            horizontal_position = self._balloon.pos[:2]
             runaway = bool(
-                abs(self._balloon.pos[0]) > XY_ABORT
-                or abs(self._balloon.pos[1]) > XY_ABORT
+                not np.all(np.isfinite(horizontal_position))
+                or np.any(np.abs(horizontal_position) > XY_ABORT)
             )
         terminated = bool(deflated or ballast_empty or runaway)
         self.truncated = self._time >= self.cfg["time_max"]
@@ -1322,6 +1334,11 @@ class Balloon3DEnv(gym.Env):
             "terminal_observation": self.final_obs,
             "distance": float(self._prev_distance),
             "scenario": self._scenario,
+            "weather_clipped": self._weather_clipped,
+            "weather_clipped_steps": self._weather_clipped_steps,
+            "weather_clipped_fraction": (
+                self._weather_clipped_steps / self._time if self._time else 0.0
+            ),
         }
 
     # ------------------------------------------------------------------

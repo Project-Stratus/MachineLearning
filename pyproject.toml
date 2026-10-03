@@ -69,6 +69,8 @@ gpu = [
 ]
 weather = [
   "cdsapi>=0.7",
+  "cfgrib>=0.9.15",
+  "eccodes>=2.38",
   "xarray>=2025.1",
   "netCDF4>=1.7",
 ]

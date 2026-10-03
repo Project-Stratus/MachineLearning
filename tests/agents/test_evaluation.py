@@ -47,6 +47,7 @@ class StubEnv:
         termination_reason=None,
         terminate=False,
         max_episode_steps=None,
+        weather_clipped_fraction=None,
     ):
         self.distances = list(distances)
         self.rewards = (
@@ -54,6 +55,7 @@ class StubEnv:
         )
         self.termination_reason = termination_reason
         self.terminate = terminate
+        self.weather_clipped_fraction = weather_clipped_fraction
         self.spec = SimpleNamespace(
             max_episode_steps=(
                 max_episode_steps
@@ -82,6 +84,8 @@ class StubEnv:
         terminated = bool(last and self.terminate)
         truncated = bool(last and not self.terminate)
         info = {"distance": distance}
+        if self.weather_clipped_fraction is not None:
+            info["weather_clipped_fraction"] = self.weather_clipped_fraction
         if last and self.termination_reason is not None:
             info["termination_reason"] = self.termination_reason
         return self._obs(), reward, terminated, truncated, info
@@ -358,6 +362,28 @@ class TestEvaluatePolicyTWR:
         assert results["episode_twr"] == pytest.approx([0.5, 0.5, 0.5])
         assert results["episode_lengths"] == [2, 2, 2]
 
+    def test_reports_weather_domain_clipping(self):
+        env = StubEnv([0.0, 0.0], weather_clipped_fraction=0.25)
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            env,
+            make_scenario_set(3, seed=0),
+            station_radius=RADIUS,
+        )
+        assert results["mean_weather_clipped_fraction"] == pytest.approx(0.25)
+        assert results["episode_weather_clipped_fraction"] == pytest.approx(
+            [0.25, 0.25, 0.25]
+        )
+
+    def test_missing_weather_clipping_telemetry_defaults_to_zero(self):
+        results = evaluate_policy_twr(
+            PassiveDriftAgent(),
+            StubEnv([0.0]),
+            make_scenario_set(1, seed=0),
+            station_radius=RADIUS,
+        )
+        assert results["mean_weather_clipped_fraction"] == 0.0
+
 
 # --------------------------------------------------------------------------- #
 # TWREvalCallback
@@ -385,6 +411,7 @@ class TestTWREvalCallback:
         recorded = model.logger.dumps[0]
         assert "eval/twr" in recorded
         assert "eval/mean_return" in recorded
+        assert "eval/mean_weather_clipped_fraction" in recorded
         assert recorded["eval/twr"] == pytest.approx(0.5)
         assert recorded["eval/mean_return"] == pytest.approx(4.0)
 

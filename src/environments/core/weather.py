@@ -391,6 +391,14 @@ class ReanalysisWeatherProvider:
                 f"[{self.cube.time_s[0]}, {self.cube.time_s[-1]}] s"
             )
 
+    def contains_horizontal(self, x: float, y: float) -> bool:
+        """Return whether a point is inside the downloaded horizontal domain."""
+
+        return bool(
+            self.cube.x_m[0] <= x <= self.cube.x_m[-1]
+            and self.cube.y_m[0] <= y <= self.cube.y_m[-1]
+        )
+
     def _check_bounds(self, x: float, y: float, z: float) -> None:
         if self.bounds_policy != "raise":
             return

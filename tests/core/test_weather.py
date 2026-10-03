@@ -95,6 +95,8 @@ class TestReanalysisProvider:
 
     def test_bounds_can_raise_or_clip(self):
         strict = ReanalysisWeatherProvider(make_cube(), bounds_policy="raise")
+        assert strict.contains_horizontal(0.0, 0.0)
+        assert not strict.contains_horizontal(1_000_000.0, 0.0)
         with pytest.raises(ValueError, match="outside weather domain"):
             strict.sample(1_000_000.0, 0.0, 20_000.0)
 
