@@ -30,7 +30,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10
+        # setup-uv publishes no floating major tags (v7 was the last one), so
+        # pin the exact release; dependabot bumps it.
+        uses: astral-sh/setup-uv@v10.3.0
 
       - name: Resolve every install option per platform
         shell: bash
