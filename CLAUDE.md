@@ -58,7 +58,6 @@ Also worth knowing (roadmap §2.2): Layers 1–2 are deterministic, so the retur
 ### Installation
 ```bash
 pip install -e .[dev]        # Development (recommended)
-pip install -e .[dev,gpu]    # GPU-enabled training
 pip install -e .[dev,weather] # ERA5 download/preprocessing tools
 ```
 

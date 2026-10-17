@@ -52,11 +52,10 @@ Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) a
 
 ## Getting started
 ### Prerequisites
-- Python 3.11 (via `conda`, `pyenv`, or system install)
-- Recent pip and build tooling:
-  - `python -m pip install -U pip hatchling build`
-  - A C/C++ toolchain (Linux: `build-essential`; macOS: Xcode CLT; Windows: MSVC Build Tools)
-- Optional (for `gpu` extra): NVIDIA driver compatible with CUDA 12.4 and CUDA 12.4 runtime
+- Python 3.11 (via `conda`, `pyenv`, or system install). Python 3.14 is not supported yet.
+- Recent pip and build tooling: `python -m pip install -U pip hatchling build`
+- A supported platform: Linux x86_64, macOS 14+ on Apple Silicon, or Windows x64. Every dependency ships prebuilt wheels for these, so no C/C++ compiler is needed. Intel Macs are not supported natively — PyTorch publishes no Intel-Mac wheels for the pinned version — so use HPC instead.
+- Optional, for GPU training: Linux with an NVIDIA driver that supports CUDA 12.8. On Linux the normal install already includes CUDA-enabled PyTorch, so there is no separate GPU extra. Without a CUDA device, `-g` warns and falls back to CPU.
 
 ### Set up your workspace
 1. Clone the repository and `cd MachineLearning`
@@ -71,7 +70,6 @@ Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) a
 Run ONE of these options depending on your intention:
 - Core runtime: `pip install -e .`
 - Development tooling (recommended): `pip install -e .[dev]`
-- GPU-enabled training stack: `pip install -e .[dev,gpu]`
 - ERA5 download/preprocessing tooling: `pip install -e .[dev,weather]`
 
 ### Install the pre-commit hooks (required if you plan to commit)

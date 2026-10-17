@@ -213,6 +213,20 @@ MAX_ENVS = max(2, AVAILABLE_CPUS - 2)
 N_ENVS = min(MAX_ENVS, max(1, AVAILABLE_CPUS // 2))  # overridden by train(n_envs=...)
 
 
+def _select_device(use_gpu: bool) -> torch.device:
+    """CUDA if ``use_gpu`` and a CUDA device exists, otherwise CPU.
+
+    Only CUDA counts. Without the warning, ``-g`` on a Mac — or on a Linux box
+    without an NVIDIA driver — would quietly train on CPU while looking like a
+    GPU run.
+    """
+    if use_gpu and torch.cuda.is_available():
+        return torch.device("cuda")
+    if use_gpu:
+        print("GPU requested (-g) but no CUDA device found — running on CPU.")
+    return torch.device("cpu")
+
+
 # --------------------------------------------------------------------------- #
 # Train / held-out split guard (roadmap §3.1)
 # --------------------------------------------------------------------------- #
@@ -455,11 +469,7 @@ def train(
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     torch.set_num_threads(1)
 
-    device = (
-        torch.device("cuda")
-        if (use_gpu and torch.cuda.is_available())
-        else torch.device("cpu")
-    )
+    device = _select_device(use_gpu)
 
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
     save_path = model_save_path(balloon_type, weather_manifest)
@@ -661,12 +671,7 @@ def benchmark(
                 f"No trained model under {os.path.abspath(save_path)} — baselines only."
             )
         else:
-            device = (
-                torch.device("cuda")
-                if (use_gpu and torch.cuda.is_available())
-                else torch.device("cpu")
-            )
-            model = QRDQN.load(model_path, device=device)
+            model = QRDQN.load(model_path, device=_select_device(use_gpu))
             if _model_matches_env(model, env):
                 policies["qr_dqn"] = model
                 print(f"Loaded agent from {os.path.abspath(model_path)}.zip")
@@ -758,11 +763,7 @@ def test(
 
     _EnvCls = BalloonSP3DEnv if balloon_type == "superpressure" else Balloon3DEnv
 
-    device = (
-        torch.device("cuda")
-        if (use_gpu and torch.cuda.is_available())
-        else torch.device("cpu")
-    )
+    device = _select_device(use_gpu)
 
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
     save_path = model_save_path(balloon_type, weather_manifest)

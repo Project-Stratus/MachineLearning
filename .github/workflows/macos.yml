@@ -1,0 +1,53 @@
+name: macOS
+
+# Runs the suite on Apple Silicon without slowing down ordinary PRs: only on
+# PRs that touch dependencies or CI, on pushes to main, weekly, and on demand.
+# Do not make this a required check — when the path filter skips it, GitHub
+# leaves a required check pending and blocks the merge.
+on:
+  pull_request:
+    paths:
+      - pyproject.toml
+      - requirements.txt
+      - .github/workflows/**
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      - name: Upgrade pip & tooling
+        run: |
+          python -m pip install -U pip hatchling build
+
+      - name: Install package (dev + weather extras)
+        run: |
+          pip install -e '.[dev,weather]'
+
+      # Calling into eccodes loads the bundled ecCodes C library, not just
+      # the Python wrapper.
+      - name: Weather extras import
+        run: |
+          python -c "import cdsapi, cfgrib, eccodes, netCDF4, xarray; print('ecCodes', eccodes.codes_get_api_version())"
+
+      - name: Packaging sanity check
+        run: |
+          python tests/check_install.py --build --pip-check
+
+      - name: Run unit tests
+        run: pytest -q

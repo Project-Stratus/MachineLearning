@@ -146,6 +146,26 @@ class TestAvailableCpus:
 
 
 # --------------------------------------------------------------------------- #
+# Device selection
+# --------------------------------------------------------------------------- #
+class TestSelectDevice:
+    def test_cuda_when_requested_and_present(self, monkeypatch, capsys):
+        monkeypatch.setattr(qrdqn.torch.cuda, "is_available", lambda: True)
+        assert qrdqn._select_device(True) == torch.device("cuda")
+        assert capsys.readouterr().out == ""
+
+    def test_gpu_request_without_cuda_warns_and_uses_cpu(self, monkeypatch, capsys):
+        monkeypatch.setattr(qrdqn.torch.cuda, "is_available", lambda: False)
+        assert qrdqn._select_device(True) == torch.device("cpu")
+        assert "no CUDA device" in capsys.readouterr().out
+
+    def test_cpu_by_default_even_with_cuda(self, monkeypatch, capsys):
+        monkeypatch.setattr(qrdqn.torch.cuda, "is_available", lambda: True)
+        assert qrdqn._select_device(False) == torch.device("cpu")
+        assert capsys.readouterr().out == ""
+
+
+# --------------------------------------------------------------------------- #
 # Train / held-out seed split
 # --------------------------------------------------------------------------- #
 class TestSeedGuard:
