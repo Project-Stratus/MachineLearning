@@ -72,6 +72,20 @@ if __name__ == "__main__":
         help="Held-out scenarios to score in --benchmark mode.",
     )
     parser.add_argument(
+        "--eval-scenarios",
+        type=int,
+        default=qrdqn.N_EVAL_SCENARIOS,
+        help=(
+            "Held-out scenarios per evaluation during training. Use 1 only for "
+            "the two-cube ERA5 smoke test; production defaults to 12."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-only",
+        action="store_true",
+        help="In --benchmark mode, score baselines without loading a checkpoint.",
+    )
+    parser.add_argument(
         "-ts",
         "--timesteps",
         type=int,
@@ -102,6 +116,7 @@ if __name__ == "__main__":
             balloon_type=args.balloon_type,
             n_scenarios=args.n_scenarios,
             use_gpu=args.gpu,
+            include_model=not args.baseline_only,
             weather_manifest=args.weather_manifest,
         )
     elif args.train:
@@ -114,9 +129,10 @@ if __name__ == "__main__":
             momentum_exploration=not args.no_momentum,
             total_timesteps=args.timesteps,
             weather_manifest=args.weather_manifest,
+            n_eval_scenarios=args.eval_scenarios,
         )
         if args.save_fig:
-            save_dir = f"src/models/qr_dqn_model/{args.balloon_type}"
+            save_dir = qrdqn.model_save_path(args.balloon_type, args.weather_manifest)
 
             plt.figure(figsize=(10, 6))
             plt.plot(df["global_episode"], df["r"], alpha=0.4, label="Episode reward")

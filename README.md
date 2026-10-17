@@ -52,11 +52,10 @@ Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) a
 
 ## Getting started
 ### Prerequisites
-- Python 3.11 (via `conda`, `pyenv`, or system install)
-- Recent pip and build tooling:
-  - `python -m pip install -U pip hatchling build`
-  - A C/C++ toolchain (Linux: `build-essential`; macOS: Xcode CLT; Windows: MSVC Build Tools)
-- Optional (for `gpu` extra): NVIDIA driver compatible with CUDA 12.4 and CUDA 12.4 runtime
+- Python 3.11 (via `conda`, `pyenv`, or system install). Python 3.14 is not supported yet.
+- Recent pip and build tooling: `python -m pip install -U pip hatchling build`
+- A supported platform: Linux x86_64, macOS 14+ on Apple Silicon, or Windows x64. Every dependency ships prebuilt wheels for these, so no C/C++ compiler is needed. Intel Macs are not supported natively — PyTorch publishes no Intel-Mac wheels for the pinned version — so use HPC instead.
+- Optional, for GPU training: Linux with an NVIDIA driver that supports CUDA 12.8. On Linux the normal install already includes CUDA-enabled PyTorch, so there is no separate GPU extra. Without a CUDA device, `-g` warns and falls back to CPU.
 
 ### Set up your workspace
 1. Clone the repository and `cd MachineLearning`
@@ -71,7 +70,6 @@ Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) a
 Run ONE of these options depending on your intention:
 - Core runtime: `pip install -e .`
 - Development tooling (recommended): `pip install -e .[dev]`
-- GPU-enabled training stack: `pip install -e .[dev,gpu]`
 - ERA5 download/preprocessing tooling: `pip install -e .[dev,weather]`
 
 ### Install the pre-commit hooks (required if you plan to commit)
@@ -112,6 +110,50 @@ python main.py --train --dim 3 -g --hpc \
 Weather assets are prepared offline and kept out of git. The short CDS
 download, conversion, and manifest commands are documented in
 [`notes/weather_pipeline.md`](notes/weather_pipeline.md).
+
+### Phase 2 ERA5 smoke test on the HPC
+
+Acquisition is plan-only unless `--execute` is explicit. Run the smoke profile
+on an HPC login/data-transfer node with CDS credentials and outbound network
+access—not inside the training job:
+
+```bash
+python scripts/acquire_era5_corpus.py --profile smoke --plan
+python scripts/acquire_era5_corpus.py --profile smoke --execute
+
+python scripts/plot_weather_cube.py \
+  --input weather_data/cubes/london-2018-04-15T00-model-levels.npz \
+  --output weather_data/plots/london-2018-04-15.png
+
+sbatch jobscripts/train_phase2_era5_slurm.sh
+```
+
+The smoke profile contains one 2018 training cube and one held-out 2021 cube.
+The job trains for 60,000 steps with one evaluation scenario, which crosses the
+50,000-step learning warm-up and exercises gradient updates, held-out
+evaluation, checkpointing, and TensorBoard. ERA5 checkpoints are written under
+`src/models/qr_dqn_model/<balloon_type>/era5/`; they cannot overwrite Phase 1.
+After the job completes, benchmark its checkpoint on the held-out smoke cube:
+
+```bash
+python main.py --benchmark --dim 3 --balloon-type zero_pressure \
+  --n-scenarios 1 \
+  --weather-manifest weather_data/manifests/london-smoke.json
+```
+
+Once the smoke test passes, prepare the initial 128-scenario corpus with:
+
+```bash
+python scripts/acquire_era5_corpus.py --profile sampled --plan
+python scripts/acquire_era5_corpus.py --profile sampled --execute
+```
+
+Then update `jobscripts/train_phase2_era5_slurm.sh` as directed in its header:
+use `london-spring.json`, restore 12 evaluation scenarios, choose the production
+worker count, remove the 60,000-step override, and increase the two-hour
+walltime using the measured smoke runtime. Benchmark the resulting checkpoint
+with the same command using `london-spring.json` and 12 scenarios. Phase 1
+analytic training is kept separately in `jobscripts/train_phase1_slurm.sh`.
 
 ### Accessing TensorBoard during training
 #### Local training

@@ -128,9 +128,18 @@ class TestReanalysisWeatherIntegration:
             assert obs[AMBIENT_IDX["pressure_norm"]] == pytest.approx(6_000.0 / P_MAX)
             assert obs[AMBIENT_IDX["radiative_forcing_norm"]] == pytest.approx(-0.25)
             assert info["scenario"]["wind_pattern"] == "era5"
+            assert info["weather_clipped"] is False
+            assert info["weather_clipped_fraction"] == 0.0
 
-            env.step(1)
+            _obs, _reward, _terminated, _truncated, info = env.step(1)
             assert env.last_wind == pytest.approx([12.0, -4.0, 0.25])
+            assert info["weather_clipped"] is False
+
+            env._balloon.pos[0] = 150_000.0
+            _obs, _reward, _terminated, _truncated, info = env.step(1)
+            assert info["weather_clipped"] is True
+            assert info["weather_clipped_steps"] == 1
+            assert info["weather_clipped_fraction"] == pytest.approx(0.5)
         finally:
             env.close()
 
@@ -650,6 +659,15 @@ class TestSoftHorizontalBounds:
         for _ in range(10):
             _, _, terminated, _, _ = env_1d.step(1)
             assert not terminated
+
+    @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
+    def test_non_finite_horizontal_position_aborts(self, env_3d, bad_value):
+        env_3d.reset(seed=1)
+        env_3d._balloon.pos[0] = bad_value
+        _, reward, terminated, _, info = env_3d.step(1)
+        assert terminated
+        assert reward == 0.0
+        assert "XY_ABORT" in info["termination_reason"]
 
 
 class TestResourceAccounting:

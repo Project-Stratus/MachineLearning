@@ -1,3 +1,3 @@
 # Dependencies are defined in pyproject.toml
-# Editable install with GPU and developer extras for parity with historical setup
--e .[gpu,dev]
+# Editable install with developer extras (GPU support comes with torch on Linux)
+-e .[dev]

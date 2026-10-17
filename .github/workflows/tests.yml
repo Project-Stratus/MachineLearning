@@ -18,6 +18,43 @@ jobs:
       - name: Run pre-commit hooks
         uses: pre-commit/action@v3.0.1
 
+  # Every install option must have prebuilt wheels on every supported
+  # platform. Resolution only — nothing is installed — so it takes seconds and
+  # catches a Linux-only pin before it lands. Runtime on macOS is covered by
+  # macos.yml.
+  resolve:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        # setup-uv publishes no floating major tags (v7 was the last one), so
+        # pin the exact release; dependabot bumps it.
+        uses: astral-sh/setup-uv@v10.3.0
+
+      - name: Resolve every install option per platform
+        shell: bash
+        env:
+          # Apple Silicon support starts at macOS 14 (netCDF4's oldest wheels).
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
+        run: |
+          fail=0
+          for py in 3.11 3.12 3.13; do
+            for platform in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc; do
+              for extras in "" "--extra dev" "--extra dev --extra weather"; do
+                if ! uv pip compile pyproject.toml $extras \
+                    --python-version "$py" --python-platform "$platform" \
+                    --only-binary :all: --quiet > /dev/null; then
+                  echo "::error::No prebuilt wheels for Python $py on $platform (${extras:-core})"
+                  fail=1
+                fi
+              done
+            done
+          done
+          exit $fail
+
   pytest:
     runs-on: ubuntu-latest
 
@@ -36,6 +73,15 @@ jobs:
       - name: Upgrade pip & tooling
         run: |
           python -m pip install -U pip hatchling build
+
+      # CI has no GPU, and PyPI's Linux torch drags in a few GB of CUDA
+      # libraries. Install the CPU build of the pinned version first; the
+      # editable install below then sees torch as already satisfied.
+      - name: Install CPU-only torch
+        shell: bash
+        run: |
+          TORCH=$(python -c "import tomllib; print(next(d for d in tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies'] if d.startswith('torch==')))")
+          pip install "$TORCH" --no-deps --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install package (dev extras)
         shell: bash
