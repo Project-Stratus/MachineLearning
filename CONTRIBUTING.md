@@ -7,6 +7,7 @@
 
 ## Where things are documented
 - `README.md` — setup and how to run things.
+- `onboarding/` — notebooks that teach the RL basics the project is built on. Start here if you're new.
 - `CLAUDE.md` — project scope, constraints, and domain terms (ZP/SP, station-keeping, etc).
 - `notes/development_roadmap.md` — the staged plan (Layer 1-5) and why things are sequenced that way.
 - `todo.md` — small tactical chores.

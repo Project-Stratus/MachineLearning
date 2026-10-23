@@ -51,6 +51,9 @@ the target.
 Training uses [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) and [SB3-Contrib](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib). Vectorised environments collect rollouts in parallel, and the QR-DQN agent optimises a composite reward that balances proximity to the goal, approach direction, and penalties for crashes or leaving bounds. The best checkpoint is saved automatically when evaluation reward improves.
 
 ## Getting started
+**New to the project or to reinforcement learning?** Once you've installed it
+(below), work through the notebooks in [`onboarding/`](onboarding/README.md).
+
 ### Prerequisites
 - Python 3.11 (via `conda`, `pyenv`, or system install). Python 3.14 is not supported yet.
 - Recent pip and build tooling: `python -m pip install -U pip hatchling build`
