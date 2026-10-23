@@ -52,6 +52,10 @@ dev = [
   "pytest",
   "pyqt5>=5.15",
   "build",
+  # Onboarding notebooks (onboarding/). ipykernel is what VS Code needs;
+  # jupyterlab is for everyone else.
+  "jupyterlab>=4.2",
+  "ipykernel>=6.29",
 ]
 weather = [
   "cdsapi>=0.7",
@@ -81,6 +85,12 @@ target-version = "py311"
 # Pin ruff's own default rule set explicitly, so a future ruff upgrade
 # can't silently change what gets flagged.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# The exercise copies of the onboarding notebooks have deliberate gaps, and
+# learners commit them half-finished. Their solutions (onboarding/solutions/)
+# are linted in full.
+"onboarding/[0-9]*.ipynb" = ["F401", "F811", "F821", "F841"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
