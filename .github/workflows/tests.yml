@@ -32,7 +32,7 @@ jobs:
       - name: Set up uv
         # setup-uv publishes no floating major tags (v7 was the last one), so
         # pin the exact release; dependabot bumps it.
-        uses: astral-sh/setup-uv@v10.3.0
+        uses: astral-sh/setup-uv@v10.3.3
 
       - name: Resolve every install option per platform
         shell: bash
