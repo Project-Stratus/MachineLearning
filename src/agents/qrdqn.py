@@ -405,16 +405,41 @@ def _resolve_model_path(save_path: str) -> str | None:
     return None
 
 
-def model_save_path(balloon_type: str, weather_manifest: str | None = None) -> str:
+def model_save_path(
+    balloon_type: str,
+    weather_manifest: str | None = None,
+    run_name: str | None = None,
+) -> str:
     """Return the checkpoint directory for analytic or ERA5 training.
 
     Layer 2 changes the observation contract and requires retraining. Keeping
     its checkpoints under an ``era5`` subdirectory prevents a smoke run or
     production weather run from overwriting the Phase 1 analytic-wind model.
+
+    ``run_name`` nests the run under ``runs/<run_name>`` so concurrent
+    hyperparameter pilots each get their own checkpoints, monitor CSV and
+    TensorBoard logs instead of clobbering the production directory.
     """
 
     path = os.path.join(BASE_SAVE_PATH, balloon_type)
-    return os.path.join(path, "era5") if weather_manifest is not None else path
+    if weather_manifest is not None:
+        path = os.path.join(path, "era5")
+    if run_name is not None:
+        if not run_name or os.sep in run_name or run_name in (".", ".."):
+            raise ValueError(
+                f"run_name must be a plain directory name, got {run_name!r}"
+            )
+        path = os.path.join(path, "runs", run_name)
+    return path
+
+
+#: ``_TRAIN_CFG`` keys a run may override from the command line. Kept to the
+#: knobs the ERA5 stability pilot sweeps; anything else stays in the module dict.
+#: ``max_grad_norm`` is not in ``_TRAIN_CFG`` at all: sb3-contrib's QRDQN
+#: defaults it to None, i.e. no gradient clipping (SB3's DQN defaults to 10).
+TRAIN_OVERRIDE_KEYS = frozenset(
+    {"learning_rate", "gamma", "target_update_interval", "max_grad_norm"}
+)
 
 
 def _model_matches_env(model: object, env: gym.Env) -> bool:
@@ -440,6 +465,8 @@ def train(
     total_timesteps: int | None = None,
     weather_manifest: str | None = None,
     n_eval_scenarios: int = N_EVAL_SCENARIOS,
+    run_name: str | None = None,
+    train_overrides: dict | None = None,
 ) -> pd.DataFrame:
     """
     Train QR-DQN on the balloon environment. Returns a DataFrame of episode returns/lengths.
@@ -464,6 +491,11 @@ def train(
     ``n_eval_scenarios`` defaults to the production benchmark size. Set it to
     one only for the two-cube ERA5 smoke test; production training must restore
     the default held-out set.
+
+    ``run_name`` and ``train_overrides`` exist for parallel hyperparameter
+    pilots: each run writes under its own directory (see
+    :func:`model_save_path`) and may override the keys in
+    :data:`TRAIN_OVERRIDE_KEYS` without editing ``_TRAIN_CFG``.
     """
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -472,9 +504,18 @@ def train(
     device = _select_device(use_gpu)
 
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
-    save_path = model_save_path(balloon_type, weather_manifest)
+    save_path = model_save_path(balloon_type, weather_manifest, run_name)
     model_path = os.path.join(save_path, "qr_dqn")
-    train_cfg = _TRAIN_CFG[balloon_type]
+    overrides = dict(train_overrides or {})
+    unknown = set(overrides) - TRAIN_OVERRIDE_KEYS
+    if unknown:
+        raise ValueError(
+            f"Unsupported train overrides {sorted(unknown)}; "
+            f"allowed: {sorted(TRAIN_OVERRIDE_KEYS)}."
+        )
+    train_cfg = {**_TRAIN_CFG[balloon_type], **overrides}
+    if overrides:
+        print(f"Train config overrides: {overrides}")
     if total_timesteps is None:
         total_timesteps = _TOTAL_TIMESTEPS[balloon_type]
     else:
@@ -628,6 +669,7 @@ def benchmark(
     include_model: bool = True,
     scenario_seed: int = SCENARIO_SEED,
     weather_manifest: str | None = None,
+    run_name: str | None = None,
 ) -> dict:
     """Score every baseline (and the trained agent) on one held-out scenario set.
 
@@ -640,7 +682,7 @@ def benchmark(
     Returns ``{policy_name: results_dict}`` from :func:`evaluate_policy_twr`.
     """
     env_name = _ENV_NAMES.get(balloon_type, _ENV_NAMES["zero_pressure"])
-    save_path = model_save_path(balloon_type, weather_manifest)
+    save_path = model_save_path(balloon_type, weather_manifest, run_name)
     env_config = {**_ENV_CONFIG[balloon_type], "balloon_type": balloon_type}
     if weather_manifest is None:
         scenarios = make_scenario_set(

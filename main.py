@@ -108,7 +108,34 @@ if __name__ == "__main__":
         help="Layer 2 ERA5 scenario manifest. Training uses its train split; "
         "benchmark/inference use heldout.",
     )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="Write (or, with --benchmark, read) this run under runs/<name> in "
+        "the model directory, so parallel pilots do not overwrite each other.",
+    )
+    # Hyperparameter overrides for stability pilots; unset keeps _TRAIN_CFG.
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--gamma", type=float, default=None)
+    parser.add_argument("--target-update-interval", type=int, default=None)
+    parser.add_argument(
+        "--max-grad-norm",
+        type=float,
+        default=None,
+        help="Gradient clipping norm. QRDQN's default is no clipping.",
+    )
     args = parser.parse_args()
+    train_overrides = {
+        key: value
+        for key, value in (
+            ("learning_rate", args.learning_rate),
+            ("gamma", args.gamma),
+            ("target_update_interval", args.target_update_interval),
+            ("max_grad_norm", args.max_grad_norm),
+        )
+        if value is not None
+    }
 
     if args.benchmark:
         qrdqn.benchmark(
@@ -118,6 +145,7 @@ if __name__ == "__main__":
             use_gpu=args.gpu,
             include_model=not args.baseline_only,
             weather_manifest=args.weather_manifest,
+            run_name=args.run_name,
         )
     elif args.train:
         df = qrdqn.train(
@@ -130,9 +158,13 @@ if __name__ == "__main__":
             total_timesteps=args.timesteps,
             weather_manifest=args.weather_manifest,
             n_eval_scenarios=args.eval_scenarios,
+            run_name=args.run_name,
+            train_overrides=train_overrides,
         )
         if args.save_fig:
-            save_dir = qrdqn.model_save_path(args.balloon_type, args.weather_manifest)
+            save_dir = qrdqn.model_save_path(
+                args.balloon_type, args.weather_manifest, args.run_name
+            )
 
             plt.figure(figsize=(10, 6))
             plt.plot(df["global_episode"], df["r"], alpha=0.4, label="Episode reward")
