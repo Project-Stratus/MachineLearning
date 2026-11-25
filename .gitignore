@@ -1,6 +1,6 @@
 jobscripts/*
-!jobscripts/train_phase1_slurm.sh
-!jobscripts/train_phase2_era5_slurm.sh
+# !jobscripts/train_phase1_slurm.sh
+# !jobscripts/train_phase2_era5_slurm.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -48,6 +48,7 @@ coverage.xml
 # Log files
 *.log
 *.out
+*.err
 
 # Jupyter Notebook
 .ipynb_checkpoints
