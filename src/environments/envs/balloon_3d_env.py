@@ -1366,6 +1366,10 @@ class Balloon3DEnv(gym.Env):
             goal_pos=goal,
             z0=self.z0,
             wind_sampler=self.wind.sample,
+            # The renderer draws the full-reward region, which is a horizontal
+            # radius in 2D/3D and an altitude tolerance in 1D. Pass the env's
+            # own value rather than letting the renderer assume a constant.
+            station_radius=self._station_radius,
         )
 
     def render(self):
