@@ -32,12 +32,22 @@ The bar is **dim-specific** and `qrdqn.baseline_reference(dim)` is the source of
 
 **1D is a debugging mode, not a test.** A two-parameter bang-bang holds station 92% of the time, so a 1D result says nothing about whether the agent learned anything. Judge Layer 1 on 3D against greedy_wind.
 
-Layer 2's ERA5 runtime foundation (roadmap §4.1–§4.3) and radiative-observation
-decision (§4.4 interface) are implemented. Real CDS cubes and their validation
-have begun: the first pressure-level spike validates the pipeline but is too
-vertically coarse for production, so model-level acquisition is required
-before weather training. See `notes/weather_pipeline.md` and
-`notes/era5_spike_2024-03-15.md`.
+**Layer 2's data path is complete; training on it is the open problem.** The
+ERA5 runtime (roadmap §4.1–§4.3) and the radiative-observation interface (§4.4)
+are implemented. The model-level pilot passed
+(`notes/era5_model_level_spike_2021-04-15.md`), and the sampled corpus is built:
+`weather_data/manifests/london-spring.json`, 128 London spring cubes, 104 train
+and 24 held out (2019–2021). See `notes/weather_pipeline.md` and
+`notes/weather_corpus_plan.md`.
+
+On ERA5 the agent reaches only 0.02–0.055 held-out TWR after 3M–14M steps, against
+0.394 on analytic winds. **No ERA5 baselines exist yet**, so there is no ERA5 bar
+to judge against, and the analytic table above does not apply to weather runs.
+Per-cube baseline TWR and clipping checks are also still outstanding. Single
+evaluations swing by up to ±0.08 TWR, so don't conclude a change helped from
+one run. The day/night thermal model (§4.4) has not been started. Open work is
+tracked in GitHub issues under the "Layer 2 complete" milestone; the ERA5
+training problem is #45.
 
 Google Loon is used as **prior art for validation**, not as the thing being replicated. When citing it, frame it as evidence a design works at scale rather than as the reason to adopt it.
 

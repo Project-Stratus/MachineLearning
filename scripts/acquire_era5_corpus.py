@@ -43,12 +43,18 @@ from scripts.download_era5_model_levels import (  # noqa: E402
     _retrieve,
     request_payloads,
 )
-from scripts.prepare_era5_model_levels import convert  # noqa: E402
+from scripts.prepare_era5_model_levels import (  # noqa: E402
+    convert,
+    read_valid_timestamps,
+)
 
 HELD_OUT_YEARS = frozenset({2019, 2020, 2021})
 ALL_YEARS = tuple(range(2010, 2026))
 SAMPLED_MONTHS = (3, 4)
 SAMPLED_DAYS = (1, 8, 15, 22)
+# Length of every scenario window, shared by the conversion call and the
+# raw-coverage check so the two cannot drift apart.
+SCENARIO_DURATION_HOURS = 12
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,15 @@ class ScenarioPlan:
 
     def cube_path(self, root: Path) -> Path:
         return root / "cubes" / f"{self.slug}-model-levels.npz"
+
+    @property
+    def required_timestamps(self) -> tuple[datetime, ...]:
+        """The hourly samples this scenario's conversion window needs."""
+
+        return tuple(
+            self.start + timedelta(hours=offset)
+            for offset in range(SCENARIO_DURATION_HOURS + 1)
+        )
 
 
 @dataclass(frozen=True)
@@ -93,6 +108,16 @@ class AcquisitionBatch:
         return (
             RequestChunk(starts, "12/to/23/by/1"),
             RequestChunk(boundaries, "00"),
+        )
+
+    @property
+    def required_timestamps(self) -> frozenset[datetime]:
+        """Every timestamp the batch's scenarios convert out of its raw files."""
+
+        return frozenset(
+            stamp
+            for scenario in self.scenarios
+            for stamp in scenario.required_timestamps
         )
 
     def raw_path(self, root: Path, field: str) -> Path:
@@ -178,11 +203,53 @@ def _combine_grib(parts: list[Path], destination: Path) -> None:
         part.unlink()
 
 
+def _coverage_gap(path: Path, batch: AcquisitionBatch) -> list[datetime]:
+    """Return the timestamps ``batch`` needs that ``path`` does not contain."""
+
+    try:
+        present = read_valid_timestamps(path)
+    except (OSError, ValueError) as exc:
+        print(f"cannot read {path.name}: {exc}")
+        return sorted(batch.required_timestamps)
+    return sorted(batch.required_timestamps - present)
+
+
+def _needs_download(path: Path, batch: AcquisitionBatch) -> bool:
+    """Whether ``path`` must be fetched because it is absent or under-covered.
+
+    Batch slugs record only the year and start hour, so a raw file written by a
+    profile with different days matches by name while covering only part of the
+    window this batch converts. Checking coverage up front turns that into one
+    re-download instead of a conversion failure several batches later.
+    """
+
+    if not path.exists():
+        return True
+    missing = _coverage_gap(path, batch)
+    if not missing:
+        return False
+    required = len(batch.required_timestamps)
+    print(
+        f"replacing {path.name}: covers {required - len(missing)} of {required} "
+        f"required timestamps (missing {missing[0]:%Y-%m-%dT%H:%M} first)"
+    )
+    # Both writers keep an existing destination, so the stale file has to go
+    # before the refetch, along with any chunk parts a crashed run left behind
+    # under the same slug -- otherwise the combine would rebuild it unchanged.
+    path.unlink()
+    field = path.stem.rsplit("-", 1)[-1]
+    parts = sorted((path.parent / ".parts").glob(f"{batch.slug}-*-{field}.grib"))
+    for part in parts:
+        print(f"discarding stale chunk part {part.name}")
+        part.unlink()
+    return True
+
+
 def _download_batch(client, batch: AcquisitionBatch, root: Path, args) -> None:
     model_output = batch.raw_path(root, "ml")
     surface_output = batch.raw_path(root, "surface")
-    need_model = not model_output.exists()
-    need_surface = not surface_output.exists()
+    need_model = _needs_download(model_output, batch)
+    need_surface = _needs_download(surface_output, batch)
     if not need_model and not need_surface:
         print(f"keeping existing raw batch {batch.slug}")
         return
@@ -232,7 +299,7 @@ def _convert_scenario(
         surface_input=batch.raw_path(root, "surface"),
         output=output,
         start=scenario.start.strftime("%Y-%m-%dT%H:%M"),
-        duration_hours=12.0,
+        duration_hours=float(SCENARIO_DURATION_HOURS),
         site_name="London",
         latitude=args.latitude,
         longitude=args.longitude,
