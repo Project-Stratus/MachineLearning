@@ -51,16 +51,28 @@ Two framing points that cut across every layer:
 Layers 1–2 are deterministic. Layer 3 is where the environment becomes genuinely
 stochastic. Layer 4 is where it becomes ours specifically.
 
-**Where we are:** Layer 1 is closed out — trained and benchmarked, clearing its
-exit criterion. Layer 2's ERA5 runtime, reanalysis atmosphere, date-split
-manifests, radiative observation interface, and production-source data path are
-implemented. The 15 April 2021 London pilot validates all 137 ERA5 model
-levels, same-date pressure-level agreement, 25 native levels in the 15–25 km
-flight band, the ±10° domain, worker memory, and full 12-hour simulations. The
-next data step is the sampled 2010–2025 corpus and frozen manifest; the next
-independent code capability is the stateful day/night thermal model. See §4,
-`notes/weather_pipeline.md`, and
-`notes/era5_model_level_spike_2021-04-15.md`.
+**Where we are (November 2026):** Layer 1 is closed out — trained and
+benchmarked, clearing its exit criterion (held-out 3D TWR 0.394 against
+greedy_wind's 0.126). Layer 2's data path is complete: the ERA5 runtime,
+reanalysis atmosphere, date-split manifests and radiative observation interface
+are implemented, the 15 April 2021 model-level pilot validated the pipeline,
+and the sampled corpus is built — 128 London spring scenarios, 104 for training
+(2010–2018, 2022–2025) and 24 held out (2019–2021).
+
+**The current blocker is training on ERA5.** The agent that clears greedy_wind
+on analytic winds within about 0.75M steps reaches only 0.02–0.055 held-out TWR
+on ERA5 after 3M–14M steps, finishing around 300 km from the station. It is not
+yet known whether that is a learning failure or a task that is infeasible at
+the current 10 km radius; ERA5 baselines and a perfect-information upper bound
+come first. The other remaining Layer 2 capability is the stateful day/night
+thermal model (§4.4), which the second half of the exit criterion needs. See §4.
+
+Open work is tracked as GitHub issues under the
+[Layer 2 complete](https://github.com/Project-Stratus/MachineLearning/milestone/1)
+milestone. The ERA5 training problem is
+[#45](https://github.com/Project-Stratus/MachineLearning/issues/45), and
+[#37](https://github.com/Project-Stratus/MachineLearning/issues/37) is its
+first step.
 
 ---
 
@@ -397,6 +409,13 @@ forecast error, no measurement noise — the agent sees weather truth.
 **Exit criterion:** same benchmark on real winds; policy survives a sunset
 without crashing.
 
+**Status:** neither half is met yet. The data path (§4.1–§4.3) is complete, but
+the agent does not yet learn on ERA5 winds
+([#45](https://github.com/Project-Stratus/MachineLearning/issues/45)), and the
+day/night thermal model (§4.4,
+[#38](https://github.com/Project-Stratus/MachineLearning/issues/38)) has not
+been started.
+
 ### 4.1 Wind field generation
 
 **Implementation foundation and model-level pilot complete.** ERA5
@@ -408,7 +427,9 @@ conversion, manifest selection and the analytic fallback are implemented. See
 `notes/weather_pipeline.md`. The 15 March 2024 pressure-level spike found the
 vertical-resolution and domain limits; the 15 April 2021 model-level pilot
 resolves both with 25 native flight-band levels and a zero-clipping ±10° box.
-See `notes/era5_model_level_spike_2021-04-15.md`.
+See `notes/era5_model_level_spike_2021-04-15.md`. The full sampled corpus
+(128 cubes, `notes/weather_corpus_plan.md`) has since been acquired on this
+path.
 
 *Prior art:* Loon used ERA5 reanalysis modified with Perlin-style procedural
 noise, varying the seed to generate unlimited scenarios; BLE ships a VAE for
@@ -441,13 +462,18 @@ altitudes), estimated 67% availability across the tropics from ~18,000
 gridpoints × hourly queries 2000–2019, and used it to *reject* impossible
 training scenarios — a useful idea for keeping the benchmark honest.
 
-**Manifest tooling implemented; population awaits real data.** Records are
-split by complete year, content-hashed, and stratified by transparent wind
-diversity/speed/shear features. London in March/April is the initial corpus.
-The frozen held-out years are 2019–2021 to overlap the mature Google/Loon
-flight record, including the locally available Q2-2021 telemetry.
-Baseline TWR must be added after the first real corpus is built; the current
-score is a stratification proxy, not a final definition of difficulty.
+**Corpus built; quality checks outstanding.** Records are split by complete
+year, content-hashed, and stratified by transparent wind
+diversity/speed/shear features. The initial corpus, London in March/April, is
+populated: `weather_data/manifests/london-spring.json` holds 128 scenarios
+(104 train, 24 held out), balanced across easy/medium/hard bands. The frozen
+held-out years are 2019–2021 to overlap the mature Google/Loon flight record,
+including the locally available Q2-2021 telemetry.
+Per-cube baseline TWR and horizontal-clipping checks have not yet been run
+across the corpus and must be added before the manifest is frozen for training
+([#44](https://github.com/Project-Stratus/MachineLearning/issues/44)). Until
+then the difficulty score is a stratification proxy, not a final definition of
+difficulty.
 
 ### 4.4 Day/night radiative thermal — end of Layer 2
 
