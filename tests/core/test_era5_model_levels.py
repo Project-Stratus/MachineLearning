@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import argparse
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
 
 from environments.core.constants import G
+from scripts import acquire_era5_corpus
 from scripts.acquire_era5_corpus import (
     _combine_grib,
+    _needs_download,
     acquisition_batches,
     corpus_scenarios,
 )
@@ -119,6 +121,76 @@ def test_noon_batch_adds_the_following_midnight_boundary():
     assert batch.chunks[1].dates == tuple(
         scenario.start.date() + timedelta(days=1) for scenario in scenarios
     )
+
+
+def midnight_batch(year: int):
+    scenarios = [
+        scenario
+        for scenario in corpus_scenarios("sampled")
+        if scenario.start.year == year and scenario.start.hour == 0
+    ]
+    return acquisition_batches(scenarios)[0]
+
+
+def test_scenario_window_needs_hourly_samples_through_both_endpoints():
+    batch = midnight_batch(2018)
+    scenario = batch.scenarios[0]
+
+    assert len(scenario.required_timestamps) == 13
+    assert scenario.required_timestamps[0] == scenario.start
+    assert scenario.required_timestamps[-1] == scenario.start + timedelta(hours=12)
+    assert len(batch.required_timestamps) == 13 * len(batch.scenarios)
+
+
+def test_raw_batch_from_another_profile_is_replaced_not_converted(
+    tmp_path, monkeypatch
+):
+    """Slugs omit the days, so a smoke batch matches the sampled name.
+
+    Reusing it on coverage rather than on filename turns what used to be a
+    conversion failure several batches later into one re-download here.
+    """
+
+    batch = midnight_batch(2018)
+    raw = tmp_path / "london-2018-spring-T00-ml.grib"
+    raw.write_bytes(b"GRIB-15-april-only")
+    part = tmp_path / ".parts" / "london-2018-spring-T00-0-ml.grib"
+    part.parent.mkdir()
+    part.write_bytes(b"GRIB-stale-chunk")
+    smoke_start = datetime(2018, 4, 15, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        acquire_era5_corpus,
+        "read_valid_timestamps",
+        lambda path: {smoke_start + timedelta(hours=hour) for hour in range(13)},
+    )
+
+    assert _needs_download(raw, batch) is True
+    assert not raw.exists()
+    assert not part.exists()
+
+
+def test_fully_covered_raw_batch_is_reused(tmp_path, monkeypatch):
+    batch = midnight_batch(2018)
+    raw = tmp_path / "london-2018-spring-T00-ml.grib"
+    raw.write_bytes(b"GRIB-every-day")
+    monkeypatch.setattr(
+        acquire_era5_corpus,
+        "read_valid_timestamps",
+        lambda path: set(batch.required_timestamps),
+    )
+
+    assert _needs_download(raw, batch) is False
+    assert raw.exists()
+
+
+def test_absent_raw_batch_keeps_parts_a_crashed_run_can_resume_from(tmp_path):
+    batch = midnight_batch(2018)
+    part = tmp_path / ".parts" / "london-2018-spring-T00-0-ml.grib"
+    part.parent.mkdir()
+    part.write_bytes(b"GRIB-resumable-chunk")
+
+    assert _needs_download(tmp_path / "london-2018-spring-T00-ml.grib", batch) is True
+    assert part.exists()
 
 
 def test_grib_parts_are_combined_in_order_and_removed(tmp_path):

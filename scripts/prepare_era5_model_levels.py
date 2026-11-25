@@ -11,6 +11,7 @@ procedure, before all fields are interpolated onto geometric altitude.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -115,6 +116,48 @@ def read_hybrid_coefficients(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"{path} has no ERA5 L137 pv coefficients")
     midpoint = coefficients.size // 2
     return coefficients[:midpoint], coefficients[midpoint:]
+
+
+def read_valid_timestamps(path: str | Path) -> set[datetime]:
+    """Return the distinct validity timestamps present in a GRIB file.
+
+    Only message headers are decoded, so this stays cheap enough to pre-flight
+    a multi-hundred-megabyte model-level batch before trusting its contents.
+    """
+
+    try:
+        from eccodes import (
+            codes_get,
+            codes_grib_new_from_file,
+            codes_release,
+        )
+    except ImportError as exc:
+        raise SystemExit(
+            "ecCodes support is not installed. Run `pip install -e '.[weather]'`."
+        ) from exc
+
+    stamps: set[datetime] = set()
+    with Path(path).open("rb") as handle:
+        while True:
+            message = codes_grib_new_from_file(handle, headers_only=True)
+            if message is None:
+                break
+            try:
+                day = int(codes_get(message, "validityDate"))
+                clock = int(codes_get(message, "validityTime"))
+            finally:
+                codes_release(message)
+            stamps.add(
+                datetime(
+                    day // 10_000,
+                    day // 100 % 100,
+                    day % 100,
+                    clock // 100,
+                    clock % 100,
+                    tzinfo=timezone.utc,
+                )
+            )
+    return stamps
 
 
 def hybrid_pressures(
